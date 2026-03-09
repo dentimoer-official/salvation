@@ -1,0 +1,10 @@
+import math;
+
+kernel fn transform(
+    matrices: device mut [math::Matrix4],
+    out: device mut [f32],
+) {
+    let i = thread.x;
+    let scale = math::PI;
+    out[i] = scale;
+}

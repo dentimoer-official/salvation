@@ -1,0 +1,8 @@
+pub struct Matrix4 {
+    col0: vec4<f32>,
+    col1: vec4<f32>,
+    col2: vec4<f32>,
+    col3: vec4<f32>,
+}
+
+pub const PI: f32 = 3.14159;

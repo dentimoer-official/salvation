@@ -1,0 +1,11 @@
+struct Particle {
+    mass: f32,
+}
+
+const MAX_THREADS: u32 = 1024;
+
+kernel fn update(
+    particles: device mut [Particle],
+) {
+    let i = thread.x;
+}
