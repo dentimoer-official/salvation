@@ -66,6 +66,12 @@ cd salvation
 cargo run -- tests/test_1/add.slvt
 ```
 
+<br>
+
+## Contact
+
+For any inquiries, feel free to send an email to [dentimoer@icloud.com](mailto:dentimoer@icloud.com) — I'll do my best to respond sincerely.
+
 ---
 ---
 
@@ -138,3 +144,9 @@ git clone https://github.com/사용자이름/salvation.git
 cd salvation
 cargo run -- tests/test_1/add.slvt
 ```
+
+<br>
+
+## 문의
+
+자세한 문의 사항은 [dentimoer@icloud.com](mailto:dentimoer@icloud.com) 으로 메일 보내주시면 성실히 대답해드리겠습니다.
