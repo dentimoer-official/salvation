@@ -3,7 +3,33 @@ name = "salvation"
 version = "0.1.0"
 edition = "2024"
 
+[workspace.package]
+edition = "2024"
+authors = ["dentimoer-official <dentimoer@icloud.com>"]
+
+[workspace]
+members = [
+    "salvation-metal",
+    "salvation-rocm",
+    "salvation-vulkan",
+    "salvation-zed-extension"
+]
+
+[workspace.dependencies]
+clap    = { version = "4.4", features = ["derive"] }
+thiserror = "1.0"
+anyhow  = "1.0"
+serde   = { version = "1", features = ["derive"] }
+serde_json = "1"
+colored = "2.1"
+which   = "6.0"
+
 [dependencies]
-logos = "0.16.1"
-sysinfo = "0.38.2"
-thiserror = "2.0.18"
+clap.workspace = true
+colored.workspace = true
+salvation-metal = { path = "./salvation-metal" }
+salvation-vulkan = { path = "./salvation-vulkan" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+which.workspace = true

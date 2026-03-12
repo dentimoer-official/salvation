@@ -1,0 +1,89 @@
+// ─────────────────────────────────────────────────────────────
+// example.slvt  — 텍스처 + Phong 라이팅 셰이더 예제
+// ─────────────────────────────────────────────────────────────
+
+// ── 버텍스 입력 구조체
+struct VertexIn {
+    @attribute(0) position: float3,
+    @attribute(1) normal:   float3,
+    @attribute(2) uv:       float2,
+}
+
+// ── 버텍스 → 프래그먼트 출력
+struct VertexOut {
+    @position     clip_pos:  float4,
+    @attribute(0) world_pos: float3,
+    @attribute(1) normal:    float3,
+    @attribute(2) uv:        float2,
+}
+
+// ── 유니폼 (카메라 / 라이팅)
+@group(0) @binding(0)
+uniform SceneUniforms {
+    mvp:        mat4x4,
+    model:      mat4x4,
+    light_pos:  float3,
+    cam_pos:    float3,
+}
+
+// ── 텍스처 & 샘플러
+@group(0) @binding(1)
+texture2d base_tex: texture2d
+
+@group(0) @binding(2)
+sampler   base_smp: sampler
+
+// ── 헬퍼 함수: Phong 라이팅 계산
+fn phong(normal: float3, light_dir: float3, view_dir: float3) -> float3 {
+    let ambient: float3  = float3(0.1, 0.1, 0.1);
+    let diff: float      = clamp(dot(normal, light_dir), 0.0, 1.0);
+    let diffuse: float3  = float3(diff, diff, diff);
+    let reflect_dir: float3 = reflect(light_dir, normal);
+    let spec: float      = pow(clamp(dot(view_dir, reflect_dir), 0.0, 1.0), 32.0);
+    let specular: float3 = float3(spec, spec, spec);
+    return ambient + diffuse + specular;
+}
+
+// ── Vertex 셰이더
+vertex fn vs_main(
+    @stage_in      in:      VertexIn,
+    @buffer(0)     uniforms: SceneUniforms,
+) -> VertexOut {
+    var out: VertexOut;
+    out.clip_pos  = uniforms.mvp * float4(in.position.x, in.position.y, in.position.z, 1.0);
+    out.world_pos = in.position;
+    out.normal    = in.normal;
+    out.uv        = in.uv;
+    return out;
+}
+
+// ── Fragment 셰이더
+fragment fn fs_main(
+    @stage_in      in:      VertexOut,
+    @buffer(0)     uniforms: SceneUniforms,
+    @texture(1)    tex:     texture2d,
+    @sampler(2)    smp:     sampler,
+) -> float4 {
+    let base_color: float4 = sample(tex, smp, in.uv);
+    let n: float3    = normalize(in.normal);
+    let l: float3    = normalize(uniforms.light_pos - in.world_pos);
+    let v: float3    = normalize(uniforms.cam_pos   - in.world_pos);
+    let lighting: float3 = phong(n, l, v);
+    return float4(base_color.rgb * lighting, base_color.a);
+}
+
+// ── GPGPU Compute 커널 (배열 합산 예제)
+@group(0) @binding(0)
+buffer in_data:  float
+
+@group(0) @binding(1)
+buffer out_data: float
+
+kernel fn sum_kernel(
+    @thread_position_in_grid tid: uint,
+    @buffer(0) input:  float,
+    @buffer(1) output: float,
+) {
+    out_data = in_data + in_data;
+    return;
+}
