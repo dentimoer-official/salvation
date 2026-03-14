@@ -1,0 +1,163 @@
+GPU 프로그래밍 문제 목록 (ROCm/HIP, Vulkan, CUDA, Metal 등 공통/특유/2026 최신 포함)
+
+### 메모리 / 할당 / 접근 관련
+- invalid device pointer [❌]
+- out of memory (OOM) even when VRAM available [❌]
+- fragmented memory allocation failure [❌]
+- buffer overrun / out-of-bounds access [❌]
+- use-after-free in shader/compute [❌]
+- invalid image / texture fetch [❌]
+- resource aliasing without hazard [❌]
+- double free / use-after-free in driver [❌]
+- ECC error silent corruption [❌]
+- device lost / TDR reset [❌]
+- GPU hang → driver crash without recovery [❌]
+- memory leak in queue / command buffer [❌]
+- invalid device function call [❌]
+- hipErrorInvalidImage / cudaErrorInvalidImage [❌]
+- hipErrorInvalidDeviceFunction [❌]
+- invalid kernel binary / no binary for gpu [❌]
+- invalid hip module / function / stream / event / mem / array / texture [❌]
+- memory allocation failure despite sufficient VRAM (ROCm 7.1 gfx1200 Windows) [❌]
+- segfault on any VRAM access (Strix Halo gfx1151 ROCm/torch nightly) [❌]
+- Microscaling (MX) block alignment / coalescing failure (Tensor Core fallback) [❌]
+
+### Synchronization / Race / Barrier 관련
+- data race in global memory [❌]
+- data race in shared memory [❌]
+- barrier mismatch (__syncthreads missing / wrong scope) [❌]
+- subgroup / warp sync missing [❌]
+- timeline semaphore missing [❌]
+- execution dependency missing [❌]
+- image layout transition missing [❌]
+- multi-queue race [❌]
+- stream / event dependency missing [❌]
+- over-synchronization stall [❌]
+- cooperative group grid sync failure [❌]
+- race in indirect dispatch parameters [❌]
+- race in multi-process multi-GPU allocation [❌]
+- threadgroup_barrier missing [❌]
+- SIMD-group sync missing [❌]
+- resource hazard missing [❌]
+- render pass subpass dependency missing [❌]
+- CUDA-Vulkan image interop synchronization fail (Windows readback zeros) [❌]
+- unaligned unified memory atomic operations race (CPU-GPU UMA) [❌]
+
+### Precision / 수치 / 결과 불일치
+- platform-specific math function difference [❌]
+- rounding mode difference (_ru/_rd/_rz missing) [❌]
+- denormal / flush-to-zero difference [❌]
+- FMA vs non-FMA difference [❌]
+- fp16/bf16 rounding difference [❌]
+- NaN / Inf propagation difference [❌]
+- reduction sum / mean slight difference → loss explosion [❌]
+- deterministic mode broken [❌]
+- silent data corruption (SDC) [❌]
+- corrupted output / token spamming on MoE models long context (CUDA cuBLAS FP16 overflow/NaN) [❌]
+- black images in FP16 Stable Diffusion (ROCm WSL2) [❌]
+- 4-bit/MXFP4 dynamic range collapse (Underflow/NaN spread without warning) [❌]
+- Register packing bitwise error leading to silent weight corruption [❌]
+
+### 성능 / 최적화 실패
+- warp / wavefront divergence [❌]
+- low occupancy (register pressure) [❌]
+- memory coalescing failure [❌]
+- bank conflict [❌]
+- shader compilation stutter / hitch [❌]
+- tile-based overdraw [❌]
+- low arithmetic intensity [❌]
+- thermal / power throttling [❌]
+- uneven workload distribution [❌]
+- multi-GPU load imbalance [❌]
+- PCIe fallback bottleneck [❌]
+- shader side effects without barrier [❌]
+- register spill to memory [❌]
+- occupancy too low [❌]
+- divergence penalty [❌]
+- power limit hit [❌]
+- __syncwarp() semantics mismatch perf drop (Vulkan vs CUDA) [❌]
+- Tensor Core / Matrix Core fallback due to unaligned strides [❌]
+- JIT/Graph compilation overhead exceeding execution time (Apple Silicon MLX/CoreML) [❌]
+
+### 설치 / 드라이버 / 호환성 / 플랫폼
+- driver version mismatch [❌]
+- ROCm installation failure (Linux kernel regression) [❌]
+- Windows ROCm support broken / incomplete [❌]
+- HIP vs CUDA library binary missing [❌]
+- HIPIFY partial conversion failure [❌]
+- comgr ABI break [❌]
+- validation layer off → different GPU behavior [❌]
+- WSL2 + driver connection reset [❌]
+- MoltenVK overhead / crash [❌]
+- HIP_PLATFORM=nvcc invalid value [❌]
+- cuda visible devices conflict [❌]
+- container gpu passthrough uuid collision [❌]
+- docker nvidia runtime fail [❌]
+- kernel regression breaking ROCm [❌]
+- gfx version / compute capability mismatch [❌]
+- ROCm 7.1 gfx1200 (RX 9000 series Windows) partial/unstable support + CUBLAS_STATUS_INTERNAL_ERROR [❌]
+- driver timeout / app crash intermittent (ROCm WSL2 ComfyUI/Stable Diffusion) [❌]
+- "No WDDM adapters found" or "hsa_init Failed" (ROCm version ahead of Adrenalin driver) [❌]
+
+### 에러 코드 목록 (주요 API별 요약)
+[CUDA] 
+- cudaErrorIllegalAddress, cudaErrorMemoryAllocation, cudaErrorLaunchTimeout, 
+  cudaErrorLaunchOutOfResources, cudaErrorInvalidDevicePointer, cudaErrorECCUncorrectable 등
+- libcuda segfault on long prompt multi-GPU op-offload (Qwen35MoE 등) [❌]
+
+[HIP/ROCm]
+- hipErrorInvalidValue, hipErrorOutOfMemory, hipErrorNoBinaryForGpu,
+  hipErrorNoKernelImageForDevice, hipErrorInvalidHipModule/Stream/Event 등
+- HIP graph capture segfault / no error but wrong output (PyTorch ROCm 2.7+) [❌]
+
+[Vulkan]
+- VK_ERROR_OUT_OF_DEVICE_MEMORY, VK_ERROR_DEVICE_LOST, VK_ERROR_INITIALIZATION_FAILED,
+  VK_ERROR_INCOMPATIBLE_DRIVER, VK_ERROR_VALIDATION_FAILED_EXT 등
+
+[Metal]
+- MTLCommandBufferErrorTimeout, MTLCommandBufferErrorPageFault, MTLCommandBufferErrorOutOfMemory,
+  MTLCommandBufferErrorResourceHazardMissing, MTLCommandBufferErrorNilResource 등
+
+### 그래픽 + 컴퓨트 혼용 특유
+- render pass attachment misuse [❌]
+- subpass dependency missing [❌]
+- mesh shader local size instability [❌]
+- indirect draw parameter race [❌]
+- compute → graphics hazard missing [❌]
+- image layout transition missing corruption [❌]
+- Sparse texture mapping page faults (Metal heap allocation mismatch) [❌]
+
+### 디버깅 / 재현성 / Silent 문제
+- race non-deterministic / heisenbug [❌]
+- GPU-side crash no stack trace [❌]
+- benign race turns malignant [❌]
+- validation layer false negative [❌]
+- different result per run / per GPU / per driver [❌]
+- silent corruption no error code [❌]
+
+### Multi-GPU / 분산 / 서버 특유
+- peer-to-peer access disabled [❌]
+- topology detection failure [❌]
+- NCCL/RCCL collective hang [❌]
+- container passthrough UUID collision [❌]
+- inter-node sync failure [❌]
+- GPU isolation failure [❌]
+- nvlink/infinity fabric fallback pcie bottleneck [❌]
+- mixed GPU crash on batch >8 (Radeon VII + MI25 ROCm Qwen Coder Next) [❌]
+
+### 기타 희귀 / 치명적 (2026 최신 포함)
+- infinite loop timeout → device removal [❌]
+- shader complexity trigger wrong output [❌]
+- driver CVE race condition privilege escalation [❌]
+- swap spill → driver crash [❌]
+- version dependency hell [❌]
+- framework pinned revision required [❌]
+- cold reboot needed after hang [❌]
+- ECC uncorrectable error accumulation [❌]
+- ZLUDA/ROCm ABI break silent fail [❌]
+- wgpu lock contention / breaking changes [❌]
+- Metal background suspend timeout [❌]
+- WGSL vs SPIR-V translation bugs [❌]
+- dynamic indexing in captured graph silent wrong result [❌]
+- MXFP4 unsupported on Blackwell sm_120 (CUDA compilation fail) [❌]
+- PTX backward compatibility broken on newer driver (invalid device function loop) [❌]
