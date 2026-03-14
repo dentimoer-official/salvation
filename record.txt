@@ -1,2 +1,5 @@
 2026.3.12
 - salvation-metal 구조와 문법 정리
+
+2026.3.13
+- cross 개발 시작(cli 돌려보니, cross가 아니라 salvation을 입력해야 커맨드가 먹히는 문제가 있었음)

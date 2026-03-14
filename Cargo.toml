@@ -8,7 +8,7 @@ edition = "2024"
 authors = ["dentimoer-official <dentimoer@icloud.com>"]
 
 [workspace]
-members = [
+members = ["salvation-core",
     "salvation-metal",
     "salvation-rocm",
     "salvation-vulkan",
@@ -16,20 +16,19 @@ members = [
 ]
 
 [workspace.dependencies]
-clap    = { version = "4.4", features = ["derive"] }
 thiserror = "1.0"
 anyhow  = "1.0"
 serde   = { version = "1", features = ["derive"] }
 serde_json = "1"
-colored = "2.1"
-which   = "6.0"
 
 [dependencies]
-clap.workspace = true
-colored.workspace = true
+chrono = "0.4.44"
+clap = { version = "4.4", features = ["derive"] }
+colored = "2.1"
+salvation-core = { path = "./salvation-core" }
 salvation-metal = { path = "./salvation-metal" }
 salvation-vulkan = { path = "./salvation-vulkan" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-which.workspace = true
+which = "6.0"

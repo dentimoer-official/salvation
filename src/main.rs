@@ -1,3 +1,5 @@
+use salvation::cli::run_salvation_cli;
+
 fn main() {
-    salvation_metal::compiler::testmain();
+    run_salvation_cli();
 }

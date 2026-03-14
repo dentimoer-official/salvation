@@ -1,8 +1,0 @@
-kernel fn add(
-    a: device [f32],
-    b: device [f32],
-    out: device mut [f32],
-) {
-    let i = thread.x;
-    out[i] = a[i] + b[i];
-}

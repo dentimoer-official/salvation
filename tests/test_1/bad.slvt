@@ -1,6 +1,0 @@
-kernel fn bad(
-    a: device [f32],
-) {
-    let i = thread.x;
-    a[i] = 1.0;
-}

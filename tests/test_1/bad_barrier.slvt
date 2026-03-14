@@ -1,7 +1,0 @@
-kernel fn bad_barrier(
-    shared: threadgroup mut [f32],
-) {
-    let i = thread.x;
-    shared[i] = 1.0;
-    let val = shared[i];
-}

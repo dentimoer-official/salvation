@@ -1,150 +1,174 @@
-pub mod helper;
-pub mod language_selector;
+use clap::{Parser, Subcommand};
+use std::process::Command;
 
-use std::env;
+#[derive(Parser)]
+#[command(
+    name = "salvation",
+    version = "0.1.0",
+    about = "간단한 크로스 플랫폼 빌드/실행 도구",
+    long_about = None
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// GPU/백엔드용 파일 빌드
+    #[command(
+        long_about = "salvation build --[want gpu] -> build gpu file that you want\n\n사용 예시:\n  salvation build --metal\n  salvation build --cuda --target myproject/\n  salvation build --vulkan\n  salvation build --rocm"
+    )]
+    Build {
+        #[arg(long, help = "Metal 백엔드 사용")]
+        metal: bool,
+
+        #[arg(long, help = "CUDA 백엔드 사용")]
+        cuda: bool,
+
+        #[arg(long, help = "Vulkan 백엔드 사용")]
+        vulkan: bool,
+
+        #[arg(long, help = "ROCm 백엔드 사용")]
+        rocm: bool,
+
+        /// 빌드할 대상 경로 (기본: 현재 디렉토리)
+        #[arg(short, long, default_value = ".")]
+        target: String,
+    },
+
+    /// 빌드된 GPU 파일 실행
+    #[command(
+        long_about = "salvation run --[want gpu] -> run gpu file that you want\n\n사용 예시:\n  salvation run --metal\n  salvation run --cuda --file mygpu.bin"
+    )]
+    Run {
+        #[arg(long, help = "Metal 백엔드 사용")]
+        metal: bool,
+
+        #[arg(long, help = "CUDA 백엔드 사용")]
+        cuda: bool,
+
+        #[arg(long, help = "Vulkan 백엔드 사용")]
+        vulkan: bool,
+
+        #[arg(long, help = "ROCm 백엔드 사용")]
+        rocm: bool,
+
+        /// 실행할 파일 경로 (기본: out)
+        #[arg(short, long, default_value = "out")]
+        file: String,
+    },
+
+    /// 개발중인 환경의 GPU 백엔드를 자동 탐지하고 가장 적합한 백엔드를 추천
+    #[command(about = "개발 환경 GPU 백엔드 자동 탐지 & 추천")]
+    Peek,
+}
 
 pub fn run_salvation_cli() {
-    let args: Vec<String> = env::args().collect();
+    let cli = Cli::parse();
 
-    // 언어 결정 로직 (우선순위: --lang → LANG 환경변수 → 기본 en)
-    let lang = get_language(&args);
+    match cli.command {
+        // ==================== BUILD ====================
+        Commands::Build { metal, cuda, vulkan, rocm, target } => {
+            let mut backends = Vec::new();
+            if metal { backends.push("metal"); }
+            if cuda  { backends.push("cuda"); }
+            if vulkan { backends.push("vulkan"); }
+            if rocm  { backends.push("rocm"); }
 
-    if args.len() == 1 {
-        print_default_help(&lang);
-        return;
-    }
+            if backends.is_empty() {
+                println!("백엔드를 하나 이상 지정해주세요.");
+                println!("예시: salvation build --metal");
+                println!("전체 사용법: salvation build --help");
+                return;
+            }
 
-    let cmd = args[1].as_str();
+            println!("빌드 시작 → 백엔드: {:?}", backends);
+            println!("대상: {}", target);
+            // ← 여기에 실제 빌드 로직 넣기
+            println!("빌드 완료! (아직 구현 안 됨)");
+        }
 
-    match cmd {
-        "help" | "--help" | "-h" => print_help(&lang),
-        "version" | "--version" | "-V" => println!("cross 0.1.0"),
-        "build" => println!("{}", t(&lang, "building", &[])),
-        "test" => println!("{}", t(&lang, "testing", &[])),
-        _ => {
-            eprintln!("{}", t(&lang, "unknown_command", &[cmd]));
-            eprintln!();
-            print_default_help(&lang);
-            std::process::exit(1);
+        // ==================== RUN ====================
+        Commands::Run { metal, cuda, vulkan, rocm, file } => {
+            let mut backends = Vec::new();
+            if metal { backends.push("metal"); }
+            if cuda  { backends.push("cuda"); }
+            if vulkan { backends.push("vulkan"); }
+            if rocm  { backends.push("rocm"); }
+
+            if backends.is_empty() {
+                println!("백엔드를 지정해주세요.");
+                println!("예시: salvation run --metal");
+                println!("전체 사용법: salvation run --help");
+                return;
+            }
+
+            if backends.len() > 1 {
+                println!("한 번에 하나의 백엔드만 실행 가능합니다.");
+                return;
+            }
+
+            println!("실행 → 백엔드: {:?}, 파일: {}", backends[0], file);
+            // ← 여기에 실제 실행 로직 넣기
+            println!("실행 완료! (아직 구현 안 됨)");
+        }
+
+        // ==================== PEEK (새로 추가) ====================
+        Commands::Peek => {
+            println!("🔍 salvation peek - 개발 환경 GPU 백엔드 탐지");
+            println!();
+
+            let os = std::env::consts::OS;
+            println!("운영체제 : {}", os);
+
+            let recommended = detect_recommended_backend();
+
+            println!("추천 백엔드 : --{}", recommended);
+            println!();
+            println!("바로 사용하기:");
+            println!("   salvation build --{}", recommended);
+            println!("   salvation run   --{}", recommended);
+            println!();
+            println!("다른 백엔드도 지원합니다:");
+            println!("   --metal  --cuda  --vulkan  --rocm");
+            println!();
+            println!("전체 도움말 보기: salvation --help");
         }
     }
 }
 
-// 언어 결정 함수
-fn get_language(args: &[String]) -> String {
-    // --lang ko 또는 --lang en 찾기
-    for i in 1..args.len() {
-        if args[i] == "--lang" && i + 1 < args.len() {
-            let l = args[i + 1].to_lowercase();
-            if l == "ko" || l == "en" {
-                return l;
-            }
-        }
+// ==================== GPU 탐지 로직 ====================
+fn detect_recommended_backend() -> String {
+    // 1. macOS → Metal이 가장 자연스럽고 성능 좋음
+    if std::env::consts::OS == "macos" {
+        return "metal".to_string();
     }
 
-    // 환경변수 LANG 체크
-    if let Ok(lang) = env::var("LANG") {
-        if lang.to_lowercase().starts_with("ko") {
-            return "ko".to_string();
-        }
+    // 2. NVIDIA GPU 있는지 확인 (nvidia-smi 존재하면 CUDA 추천)
+    if Command::new("nvidia-smi")
+        .arg("--version")
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+    {
+        return "cuda".to_string();
     }
 
-    "en".to_string()
-}
-
-// 번역 함수
-fn t(lang: &str, key: &str, args: &[&str]) -> String {
-    let is_ko = lang == "ko";
-
-    match key {
-        "building" => {
-            if is_ko {
-                "빌드 중...".to_string()
-            } else {
-                "building...".to_string()
-            }
-        }
-        "testing" => {
-            if is_ko {
-                "테스트 중...".to_string()
-            } else {
-                "testing...".to_string()
-            }
-        }
-        "unknown_command" => {
-            let cmd_str = args.first().copied().unwrap_or("");
-            if is_ko {
-                format!("알 수 없는 명령어: {}", cmd_str)
-            } else {
-                format!("unknown command: {}", cmd_str)
-            }
-        }
-        _ => "[missing translation]".to_string(),
+    // 3. AMD ROCm 있는지 확인
+    if Command::new("rocm-smi")
+        .arg("--version")
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+        || Command::new("rocminfo")
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    {
+        return "rocm".to_string();
     }
-}
 
-fn print_default_help(lang: &str) {
-    let is_korean = lang == "korean";
-
-    if is_korean {
-        println!("cross: 간단한 크로스 플랫폼 도구 (개발중)");
-        println!();
-        println!("사용법:");
-        println!("  cross <명령어>");
-        println!();
-        println!("명령어:");
-        println!("  help       이 도움말 보기");
-        println!("  version    버전 정보");
-        println!("  build      빌드");
-        println!("  test       테스트");
-        println!();
-        println!("언어 선택: --lang ko 또는 --lang en");
-    } else {
-        println!("cross: simple cross-platform tool (WIP)");
-        println!();
-        println!("Usage:");
-        println!("  cross <command>");
-        println!();
-        println!("Commands:");
-        println!("  help       show this help");
-        println!("  version    show version");
-        println!("  build      build");
-        println!("  test       test");
-        println!();
-        println!("Language: --lang ko or --lang en");
-    }
-}
-
-fn print_help(lang: &str) {
-    let is_ko = lang == "ko";
-
-    if is_ko {
-        println!("cross 0.1.0");
-        println!("아주 간단한 CLI 예제입니다.");
-        println!();
-        println!("사용 가능한 명령어:");
-        println!("  cross help");
-        println!("  cross version");
-        println!("  cross build");
-        println!("  cross test");
-        println!();
-        println!("옵션:");
-        println!("  --help, -h     이 도움말");
-        println!("  --version, -V  버전 정보");
-        println!("  --lang <ko|en> 언어 선택 (기본: en 또는 LANG 환경변수)");
-    } else {
-        println!("cross 0.1.0");
-        println!("Very simple CLI example.");
-        println!();
-        println!("Available commands:");
-        println!("  cross help");
-        println!("  cross version");
-        println!("  cross build");
-        println!("  cross test");
-        println!();
-        println!("Options:");
-        println!("  --help, -h     Show this help message");
-        println!("  --version, -V  Show version information");
-        println!("  --lang <ko|en> Select language (default: en or LANG env)");
-    }
+    // 4. 그 외 모든 환경 → Vulkan (가장 범용적)
+    "vulkan".to_string()
 }
