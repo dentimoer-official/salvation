@@ -5,3 +5,8 @@ edition.workspace = true
 authors.workspace = true
 
 [dependencies]
+
+salvation-cuda = { path = "../salvation-cuda" }
+salvation-metal = { path = "../salvation-metal" }
+salvation-rocm = { path = "../salvation-rocm" }
+salvation-vulkan = { path = "../salvation-vulkan" }

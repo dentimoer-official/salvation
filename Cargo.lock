@@ -700,7 +700,9 @@ dependencies = [
  "clap",
  "colored",
  "salvation-core",
+ "salvation-cuda",
  "salvation-metal",
+ "salvation-rocm",
  "salvation-vulkan",
  "serde",
  "serde_json",
@@ -710,6 +712,16 @@ dependencies = [
 
 [[package]]
 name = "salvation-core"
+version = "0.1.0"
+dependencies = [
+ "salvation-cuda",
+ "salvation-metal",
+ "salvation-rocm",
+ "salvation-vulkan",
+]
+
+[[package]]
+name = "salvation-cuda"
 version = "0.1.0"
 
 [[package]]

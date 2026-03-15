@@ -31,7 +31,7 @@ pub enum Token {
     // 타입으로 쓸 애들
     Bool,
     Int,
-    Uint,   // Unit → Uint 수정
+    Uint,
     Float,
     Float2,
     Float3,
@@ -50,7 +50,7 @@ pub enum Token {
 
     // literal 문법
     IntLit(i64),
-    FloatLit(f64), // Flaot 오타 수정
+    FloatLit(f64),
     BoolLit(bool),
     StrLit(String),
 
