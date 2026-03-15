@@ -1,7 +1,38 @@
-<Salvation>
+# Salvation
 
-<요약>
-이 프로젝트는 기존에 gpu 언어가 가지는 초보자에게 너무나 높은 난이도, 어려운 플랫폼 최적화, 메모리 문제, 데이터 레이스 등을 해결하기 위해 고안 되었습니다.
+> **Empowering GPU programming with safety, simplicity, and cross-platform performance.**
 
-<본론>
-cuda, metal, rocm, vulkan에 대한 적용을 목표로 하고 있으며, 거의 모든 GPU에서 초보자도 쉽고 안전한 개발을 할 수 있게 하는것이 최종 목적지입니다.
+`Salvation` is a transpiled programming language designed to overcome the steep learning curve and critical pitfalls of modern GPU development, such as complex platform optimization, memory management issues, and data races.
+
+---
+
+## 🎯 Vision
+The core mission of **Salvation** is to bridge the gap between high-level safety and low-level GPU performance. We prioritize **memory safety** and **concurrency stability** above all else, ensuring that developers can focus on logic rather than debugging hardware-level memory leaks or race conditions.
+
+## ✨ Key Features
+- **Memory Safety:** Eliminates common pointer and allocation errors at the language level.
+- **Data Race Prevention:** Built-in mechanisms to ensure thread-safe parallel execution.
+- **Low-Level Performance:** High-performance code generation that maps directly to native GPU APIs.
+- **Simplified Abstraction:** Reduces the complexity of hardware-specific optimizations for beginners.
+
+## 🛠 Backend Support
+- [x] **Metal** (Current focus)
+- [ ] **CUDA** (Planned)
+- [ ] **ROCm** (Planned)
+- [ ] **Vulkan** (Planned)
+
+## 📝 Problem Solving & Tracking
+All technical challenges, proposed solutions, and resolved issues are meticulously documented in the **`matters.txt`** file within this repository. This file serves as the primary ledger for the project's evolution and engineering decisions.
+
+## 📅 Project Status & Roadmap
+Please note that the project will enter a temporary hibernation period due to the lead developer's mandatory military service:
+
+- **Active Development:** Until March 2027
+- **Project Hibernation:** April 2027 – October 2029
+- **Resumption:** November 2029
+
+*During the hibernation period, major updates may be paused, but the repository will remain open for community contributions and forks.*
+
+## ✉️ Contact
+For detailed inquiries, technical discussions, or collaboration, please reach out via email:
+**[dentimoer@icloud.com](mailto:dentimoer@icloud.com)**

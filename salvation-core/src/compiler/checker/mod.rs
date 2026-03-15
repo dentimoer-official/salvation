@@ -6,3 +6,4 @@ pub mod borrow_check;
 pub mod data_race_check;
 pub mod memory_check;
 pub mod type_check;
+pub mod word_check;
