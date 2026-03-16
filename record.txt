@@ -8,4 +8,8 @@
 - 처리할 문제 모두 정리 (matters.txt)
 
 2026.3.15
-- lexer 제작
+- lexer 제작 1
+
+2026.3.16
+- metal 접근을 위한 objective-c ffi 제작
+- 메모리 누수 감지 툴 고안

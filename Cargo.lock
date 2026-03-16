@@ -699,7 +699,6 @@ dependencies = [
  "chrono",
  "clap",
  "colored",
- "salvation-core",
  "salvation-cuda",
  "salvation-metal",
  "salvation-rocm",
@@ -708,16 +707,6 @@ dependencies = [
  "serde_json",
  "thiserror",
  "which",
-]
-
-[[package]]
-name = "salvation-core"
-version = "0.1.0"
-dependencies = [
- "salvation-cuda",
- "salvation-metal",
- "salvation-rocm",
- "salvation-vulkan",
 ]
 
 [[package]]
