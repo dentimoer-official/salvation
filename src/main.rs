@@ -1,5 +1,7 @@
-use salvation::cli::run_salvation_cli;
+use salvation_metal::ffi::device_name;
 
 fn main() {
-    run_salvation_cli();
+    let a = device_name().unwrap();
+    
+    println!("{}", a);
 }

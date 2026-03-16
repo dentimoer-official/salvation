@@ -5,7 +5,7 @@ edition.workspace = true
 schema_version = 1
 authors.workspace = true
 description = "Salvation Zed Extension"
-repository = "https://github.com/dentimoer-official/salvation-zed-extension"
+repository = "https://github.com/dentimoer-official/salvation/salvation-zed-extension"
 
 [lib]
 crate-type = ["cdylib"]

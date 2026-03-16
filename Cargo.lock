@@ -727,6 +727,10 @@ version = "0.1.0"
 [[package]]
 name = "salvation-metal"
 version = "0.1.0"
+dependencies = [
+ "cc",
+ "libc",
+]
 
 [[package]]
 name = "salvation-rocm"
