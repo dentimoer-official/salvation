@@ -699,6 +699,7 @@ dependencies = [
  "chrono",
  "clap",
  "colored",
+ "salvation-core",
  "salvation-cuda",
  "salvation-metal",
  "salvation-rocm",
@@ -710,8 +711,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "salvation-core"
+version = "0.1.0"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "salvation-cuda"
 version = "0.1.0"
+dependencies = [
+ "salvation-core",
+]
 
 [[package]]
 name = "salvation-metal"
@@ -719,15 +730,22 @@ version = "0.1.0"
 dependencies = [
  "cc",
  "libc",
+ "salvation-core",
 ]
 
 [[package]]
 name = "salvation-rocm"
 version = "0.1.0"
+dependencies = [
+ "salvation-core",
+]
 
 [[package]]
 name = "salvation-vulkan"
 version = "0.1.0"
+dependencies = [
+ "salvation-core",
+]
 
 [[package]]
 name = "salvation-zed-extension"

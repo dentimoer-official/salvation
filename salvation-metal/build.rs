@@ -4,7 +4,6 @@ use std::{
 
 fn main() {
     metal_manager().expect("Failed to build salvation to metal");
-    codegen_manager().expect("Failed to make metal code from salvation")
 }
 
 fn metal_manager() -> std::io::Result<()> {
@@ -60,9 +59,5 @@ fn metal_manager() -> std::io::Result<()> {
     // 이 파일이 변경될 때만 재실행
     println!("cargo:rerun-if-changed=build.rs");
     
-    Ok(())
-}
-
-fn codegen_manager() -> std::io::Result<()> {
     Ok(())
 }

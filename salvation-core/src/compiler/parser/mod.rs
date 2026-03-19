@@ -9,6 +9,8 @@
 //  "문법 모양이 맞는가" 만 검사, 의미/타입은 Checker가 담당
 // ============================================================
 
+pub mod parser_testing;
+
 use crate::compiler::lexer::Spanned;
 use crate::compiler::lexer::tokens::Token;
 use crate::compiler::ast::{

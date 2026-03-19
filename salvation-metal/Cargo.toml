@@ -10,5 +10,7 @@ crate-type = ["rlib", "staticlib"]
 [dependencies]
 libc = "0.2.183"
 
+salvation-core = { path = "../salvation-core" }
+
 [build-dependencies]
 cc = "1.0"

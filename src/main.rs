@@ -1,14 +1,36 @@
-mod compiler;
-
-use compiler::lexer::Lexer;
-use compiler::lexer::tokens::Token;
-use compiler::lexer::Spanned;
+use salvation_core::compiler::lexer::Lexer;
+use salvation_core::compiler::lexer::tokens::Token;
+use salvation_core::compiler::lexer::Spanned;
 use std::fs;
 use std::path::Path;
+use salvation_core::compiler::checker::Checker;
+
+use salvation_core::compiler::parser::parser_testing::Parser;
+use salvation_core::compiler::codegen::Codegen;
+
+fn write_file(output_dir: &str, filename: &str, content: &str) {
+    let path = Path::new(output_dir).join(filename);
+    fs::create_dir_all(output_dir).unwrap();
+    fs::write(&path, content).unwrap();
+    println!("Generated: {}", path.display());
+}
+
+fn compile(src: &str) -> Result<String, String> {
+    let tokens = Lexer::new(src).tokenize()?;
+    let ast    = Parser::new(tokens).parse()?;
+
+    // checker 통과 못 하면 에러 출력하고 중단
+    Checker::new().check(&ast).map_err(|errs| {
+        errs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("\n")
+    })?;
+
+    Ok(Codegen::new().generate(&ast))
+}
+
 
 // ── Translator ──────────────────────────────────────────────
 
-pub struct Translator {
+/*pub struct Translator {
     tokens: Vec<Spanned<Token>>,
     pos: usize,
     output: String,
@@ -271,20 +293,15 @@ impl Translator {
 
         self.output.clone()
     }
-}
+}*/
 
 // ── 파일 I/O ───────────────────────────────────────────────
 
-fn write_file(output_dir: &str, filename: &str, content: &str) {
-    let path = Path::new(output_dir).join(filename);
-    fs::create_dir_all(output_dir).unwrap();
-    fs::write(&path, content).unwrap();
-    println!("Generated: {}", path.display());
-}
+
 
 // ── main ───────────────────────────────────────────────────
 
-fn main() {
+/*fn main() {
     // .slvt 파일 읽기
     let src = fs::read_to_string("examples/test.slvt")
         .unwrap_or_else(|_| {
@@ -315,4 +332,19 @@ fn fs_main(color: float4) -> float4 {
     // 출력
     println!("{}", metal_src);
     write_file("./out", "output.metal", &metal_src);
+}*/
+
+fn main() {
+    // .slvt 파일 읽기 (없으면 인라인 테스트)
+    let src = fs::read_to_string("examples/test1.slvt")
+        .unwrap();
+
+    match compile(&src) {
+        Ok(metal) => {
+            println!("{}", metal);
+            write_file("./out", "output.metal", &metal);
+        }
+        Err(e) => eprintln!("Error: {}", e),
+    }
 }
+

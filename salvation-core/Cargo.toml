@@ -1,10 +1,9 @@
 [package]
-name = "salvation-cuda"
+name = "salvation-core"
 version = "0.1.0"
 edition.workspace = true
 authors.workspace = true
+license.workspace = true
 
 [dependencies]
-
-
-salvation-core = { path = "../salvation-core" }
+clap = "4.6.0"

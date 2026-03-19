@@ -5,12 +5,13 @@ license = "MIT OR Apache-2.0"
 
 [workspace]
 members = [
+    "salvation-core",
     "salvation-cuda",
     "salvation-metal",
     "salvation-rocm",
     "salvation-vulkan",
     "salvation-zed-extension",
-    "."
+    ".",
 ]
 resolver = "2"
 
@@ -34,6 +35,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 which = "6.0"
 
+salvation-core = { path = "./salvation-core" }
 salvation-cuda = { path = "./salvation-cuda" }
 salvation-metal = { path = "./salvation-metal" }
 salvation-rocm = { path = "./salvation-rocm" }

@@ -1,7 +1,7 @@
 // codegen.rs
 // AST (ast_testing) → Metal 소스코드 생성
 
-use salvation_core::compiler::ast::ast_testing::{
+use crate::compiler::ast::ast_testing::{
     Block, BinOpKind, Expr, Item, Param, Program, ShaderStage, Stmt, Type, UnaryOpKind,
 };
 
