@@ -1,3 +1,4 @@
+pub mod checker;
 pub mod codegen;
 pub mod ffi;
 pub mod runtime;

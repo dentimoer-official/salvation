@@ -3,7 +3,7 @@ use salvation_core::compiler::lexer::tokens::Token;
 use salvation_core::compiler::lexer::Spanned;
 use std::fs;
 use std::path::Path;
-use salvation_core::compiler::checker::Checker;
+use salvation_metal::checker::Checker;
 
 use salvation_core::compiler::parser::parser_testing::Parser;
 use salvation_core::compiler::codegen::Codegen;

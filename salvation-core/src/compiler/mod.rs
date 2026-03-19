@@ -1,6 +1,5 @@
 pub mod ast;
 pub mod cache;
-pub mod checker;
 pub mod codegen;
 pub mod error;
 pub mod lexer;
