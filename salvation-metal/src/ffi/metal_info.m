@@ -6,36 +6,38 @@
 // extern "C" 절대 쓰지 말 것 — .m 파일은 Objective-C이므로
 // 최상위에 선언한 C 함수는 자동으로 C ABI로 노출됨
 
+
+
 bool slvt_metal_is_supported(void) {
-    @autoreleasepool {
-        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-        return device != nil;
-    }
+  @autoreleasepool {
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    return device != nil; 
+  }
 }
 
 char* slvt_metal_device_name(void) {
-    @autoreleasepool {
-        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-        if (device == nil) return NULL;
+  @autoreleasepool {
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    if (device == nil) return NULL;
         
-        // device.name은 autoreleased NSString을 반환하므로 풀이 없으면 누수됨
-        const char* name = [device.name UTF8String]; 
-        return strdup(name); // 힙에 복사된 이 데이터는 Rust가 해제하므로 안전함
-    }
+    // device.name은 autoreleased NSString을 반환하므로 풀이 없으면 누수됨
+    const char* name = [device.name UTF8String]; 
+    return strdup(name); // 힙에 복사된 이 데이터는 Rust가 해제하므로 안전함
+  }
 }
 
 uint64_t slvt_metal_recommended_max_working_set_size(void) {
-    @autoreleasepool {
-        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-        if (device == nil) return 0;
-        return device.recommendedMaxWorkingSetSize;
-    }
+  @autoreleasepool {      
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    if (device == nil) return 0;
+    return device.recommendedMaxWorkingSetSize;
+  }
 }
 
 bool slvt_metal_has_unified_memory(void) {
-    @autoreleasepool {
-        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-        if (device == nil) return false;
-        return device.hasUnifiedMemory;
-    }
+  @autoreleasepool {    
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    if (device == nil) return false;
+    return device.hasUnifiedMemory;
+  }
 }

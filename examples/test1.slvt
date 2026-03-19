@@ -1,0 +1,5 @@
+@vertex
+fn vs_main(pos: float4, uv: float2) -> float4 {
+    let result: float4 = pos;
+    return result;
+}

@@ -1,6 +1,7 @@
 [workspace.package]
 edition = "2024"
 authors = ["dentimoer-official <dentimoer@icloud.com>"]
+license = "MIT OR Apache-2.0"
 
 [workspace]
 members = [
@@ -8,8 +9,10 @@ members = [
     "salvation-metal",
     "salvation-rocm",
     "salvation-vulkan",
-    "salvation-zed-extension"
+    "salvation-zed-extension",
+    "."
 ]
+resolver = "2"
 
 [workspace.dependencies]
 thiserror = "1.0"
@@ -31,7 +34,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 which = "6.0"
 
-salvation-cuda = { path = "./salvation-cuda"}
+salvation-cuda = { path = "./salvation-cuda" }
 salvation-metal = { path = "./salvation-metal" }
 salvation-rocm = { path = "./salvation-rocm" }
 salvation-vulkan = { path = "./salvation-vulkan" }
