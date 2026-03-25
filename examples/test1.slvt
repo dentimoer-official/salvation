@@ -1,4 +1,9 @@
-@vertex
+@backend(metal)
+fn main() {
+    // host-side 진입점: GPU 커널 디스패치
+}
+
+@backend(metal) @vertex
 fn vs_main(pos: float4, uv: float2) -> float4 {
     let result: float4 = pos;
     return result;

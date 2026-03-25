@@ -247,7 +247,7 @@ impl Codegen {
             }
 
             // fn / @vertex fn / @fragment fn / @kernel fn
-            Item::FnDecl { stage, name, params, ret_ty, body } => {
+            Item::FnDecl { stage, name, params, ret_ty, body, .. } => {
                 // @vertex / @fragment / @kernel
                 if let Some(s) = stage {
                     let stage_str = match s {

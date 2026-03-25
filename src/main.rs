@@ -1,357 +1,229 @@
-use salvation_core::compiler::lexer::Lexer;
-use salvation_core::compiler::lexer::tokens::Token;
-use salvation_core::compiler::lexer::Spanned;
-use salvation_metal::ffi::salvation_add;
 use std::fs;
 use std::path::Path;
-use salvation_metal::checker::Checker;
 
+use clap::{Parser as ClapParser, Subcommand};
+use colored::Colorize;
+
+use salvation_core::compiler::lexer::Lexer;
 use salvation_core::compiler::parser::parser_testing::Parser;
-use salvation_core::compiler::codegen::Codegen;
+use salvation_core::compiler::backend_resolver::BackendResolver;
+use salvation_metal::checker::Checker;
+use salvation_metal::codegen::Codegen;
 
-fn write_file(output_dir: &str, filename: &str, content: &str) {
+// ── CLI 정의 ────────────────────────────────────────────────
+
+#[derive(ClapParser)]
+#[command(
+    name    = "salvation",
+    version = "0.1.0",
+    author  = "dentimoer-official <dentimoer@icloud.com>",
+    about   = "Salvation GPU language compiler",
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// .slvt 파일을 컴파일하고 결과를 출력합니다 (fn main 필요)
+    Run {
+        /// 컴파일할 .slvt 파일 경로
+        #[arg(value_name = "FILE")]
+        file: String,
+
+        /// 출력 디렉터리 (기본값: ./out)
+        #[arg(short, long, default_value = "./out")]
+        output: String,
+
+        /// 상세 출력 모드
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
+    /// .slvt 파일을 라이브러리로 빌드합니다 (fn main 없어도 됨)
+    Build {
+        /// 컴파일할 .slvt 파일 경로
+        #[arg(value_name = "FILE")]
+        file: String,
+
+        /// 출력 디렉터리 (기본값: ./out)
+        #[arg(short, long, default_value = "./out")]
+        output: String,
+
+        /// 상세 출력 모드
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
+    /// .slvt 파일 문법/백엔드 검사만 수행합니다 (파일 생성 없음)
+    Check {
+        /// 검사할 .slvt 파일 경로
+        #[arg(value_name = "FILE")]
+        file: String,
+    },
+}
+
+// ── 컴파일 파이프라인 ────────────────────────────────────────
+
+struct CompileOutput {
+    metal_src: String,
+    has_main:  bool,
+}
+
+fn compile(src: &str, verbose: bool) -> Result<CompileOutput, String> {
+    if verbose { eprintln!("{}", "  [1/4] 렉싱...".dimmed()); }
+    let tokens = Lexer::new(src).tokenize()
+        .map_err(|e| format!("{} {}", "렉서 오류:".red().bold(), e))?;
+
+    if verbose { eprintln!("{}", "  [2/4] 파싱...".dimmed()); }
+    let ast = Parser::new(tokens).parse()
+        .map_err(|e| format!("{} {}", "파서 오류:".red().bold(), e))?;
+
+    if verbose { eprintln!("{}", "  [3/4] 백엔드 리졸빙...".dimmed()); }
+    let resolved = BackendResolver::new().resolve(ast)
+        .map_err(|errs| {
+            errs.iter()
+                .map(|e| format!("{} {}", "백엔드 오류:".red().bold(), e))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })?;
+
+    if verbose { eprintln!("{}", "  [4/4] 의미 검사...".dimmed()); }
+    Checker::new().check(&resolved.program)
+        .map_err(|errs| {
+            errs.iter()
+                .map(|e| format!("{} {}", "체커 오류:".red().bold(), e))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })?;
+
+    let metal_src = Codegen::new().generate(&resolved.program);
+
+    Ok(CompileOutput { metal_src, has_main: resolved.has_main })
+}
+
+fn check_only(src: &str) -> Result<bool, String> {
+    let tokens = Lexer::new(src).tokenize()
+        .map_err(|e| format!("{} {}", "렉서 오류:".red().bold(), e))?;
+
+    let ast = Parser::new(tokens).parse()
+        .map_err(|e| format!("{} {}", "파서 오류:".red().bold(), e))?;
+
+    let resolved = BackendResolver::new().resolve(ast)
+        .map_err(|errs| {
+            errs.iter()
+                .map(|e| format!("{} {}", "백엔드 오류:".red().bold(), e))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })?;
+
+    Ok(resolved.has_main)
+}
+
+// ── 파일 출력 ───────────────────────────────────────────────
+
+fn write_output(output_dir: &str, filename: &str, content: &str) -> Result<String, String> {
     let path = Path::new(output_dir).join(filename);
-    fs::create_dir_all(output_dir).unwrap();
-    fs::write(&path, content).unwrap();
-    println!("Generated: {}", path.display());
+    fs::create_dir_all(output_dir)
+        .map_err(|e| format!("출력 디렉터리 생성 실패: {}", e))?;
+    fs::write(&path, content)
+        .map_err(|e| format!("파일 쓰기 실패: {}", e))?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
-fn compile(src: &str) -> Result<String, String> {
-    let tokens = Lexer::new(src).tokenize()?;
-    let ast    = Parser::new(tokens).parse()?;
-
-    // checker 통과 못 하면 에러 출력하고 중단
-    Checker::new().check(&ast).map_err(|errs| {
-        errs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("\n")
-    })?;
-
-    Ok(Codegen::new().generate(&ast))
+fn out_filename(file: &str) -> String {
+    let stem = Path::new(file)
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    format!("{}.metal", stem)
 }
 
-
-// ── Translator ──────────────────────────────────────────────
-
-/*pub struct Translator {
-    tokens: Vec<Spanned<Token>>,
-    pos: usize,
-    output: String,
-    indent: usize,
-}
-
-impl Translator {
-    pub fn new(tokens: Vec<Spanned<Token>>) -> Self {
-        Translator { tokens, pos: 0, output: String::new(), indent: 0 }
-    }
-
-    fn peek(&self) -> Token {
-        self.tokens.get(self.pos)
-            .map(|s| s.node.clone())
-            .unwrap_or(Token::Eof)
-    }
-
-    fn peek2(&self) -> Token {
-        self.tokens.get(self.pos + 1)
-            .map(|s| s.node.clone())
-            .unwrap_or(Token::Eof)
-    }
-
-    // ✅ clone() 반환으로 lifetime 문제 해결
-    fn advance(&mut self) -> Token {
-        let tok = self.tokens.get(self.pos)
-            .map(|s| s.node.clone())
-            .unwrap_or(Token::Eof);
-        if self.pos < self.tokens.len() { self.pos += 1; }
-        tok
-    }
-
-    fn push(&mut self, s: &str) { self.output.push_str(s); }
-
-    fn push_indent(&mut self) {
-        for _ in 0..self.indent { self.output.push_str("    "); }
-    }
-
-    fn token_to_metal(tok: &Token) -> Option<&'static str> {
-        Some(match tok {
-            Token::Fn          => "",
-            Token::Struct      => "struct",
-            Token::Let         => "",
-            Token::Mut         => "",
-            Token::Return      => "return",
-            Token::If          => "if",
-            Token::Else        => "else",
-            Token::For         => "for",
-            Token::In          => "",
-            Token::Bool        => "bool",
-            Token::Int         => "int",
-            Token::Uint        => "uint",
-            Token::Float       => "float",
-            Token::Float2      => "float2",
-            Token::Float3      => "float3",
-            Token::Float4      => "float4",
-            Token::Mat2x2      => "float2x2",
-            Token::Mat2x3      => "float2x3",
-            Token::Mat2x4      => "float2x4",
-            Token::Mat3x2      => "float3x2",
-            Token::Mat3x3      => "float3x3",
-            Token::Mat3x4      => "float3x4",
-            Token::Mat4x2      => "float4x2",
-            Token::Mat4x3      => "float4x3",
-            Token::Mat4x4      => "float4x4",
-            Token::Device      => "device",
-            Token::Constant    => "constant",
-            Token::Threadgroup => "threadgroup",
-            Token::Thread      => "thread",
-            Token::Plus        => "+",
-            Token::Minus       => "-",
-            Token::Star        => "*",
-            Token::Slash       => "/",
-            Token::Percent     => "%",
-            Token::Eq          => "=",
-            Token::EqEq        => "==",
-            Token::BangEq      => "!=",
-            Token::Lt          => "<",
-            Token::Gt          => ">",
-            Token::LtEq        => "<=",
-            Token::GtEq        => ">=",
-            Token::And         => "&&",
-            Token::Or          => "||",
-            Token::Bang        => "!",
-            Token::Dot         => ".",
-            Token::Arrow       => ".",
-            Token::ColonColon  => "::",
-            Token::At          => "",
-            Token::LParen      => "(",
-            Token::RParen      => ")",
-            Token::LBrace      => "{",
-            Token::RBrace      => "}",
-            Token::LBracket    => "[",
-            Token::RBracket    => "]",
-            Token::Semicolon   => ";",
-            Token::Colon       => ":",
-            Token::Comma       => ",",
-            _                  => return None,
-        })
-    }
-
-    fn collect_type(&mut self) -> String {
-        let tok = self.advance();
-        Self::token_to_metal(&tok)
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| {
-                if let Token::Ident(s) = tok { s } else { "auto".into() }
-            })
-    }
-
-    fn collect_parens(&mut self) -> String {
-        if !matches!(self.peek(), Token::LParen) { return String::new(); }
-        self.advance();
-
-        let mut args: Vec<String> = Vec::new();
-        let mut current = String::new();
-
-        loop {
-            match self.peek() {
-                Token::RParen | Token::Eof => { self.advance(); break; }
-                Token::Comma => {
-                    self.advance();
-                    args.push(current.trim().to_string());
-                    current = String::new();
-                }
-                Token::Ident(_) => {
-                    let name = if let Token::Ident(s) = self.advance() { s } else { String::new() };
-                    if matches!(self.peek(), Token::Colon) {
-                        self.advance();
-                        let ty = self.collect_type();
-                        current.push_str(&format!("{} {}", ty, name));
-                    } else {
-                        current.push_str(&name);
-                    }
-                }
-                tok => {
-                    if let Some(s) = Self::token_to_metal(&tok) { current.push_str(s); }
-                    self.advance();
-                }
-            }
-        }
-
-        if !current.trim().is_empty() { args.push(current.trim().to_string()); }
-        args.join(", ")
-    }
-
-    fn translate_let(&mut self) {
-        if matches!(self.peek(), Token::Mut) { self.advance(); }
-
-        let var_name = if let Token::Ident(s) = self.advance() { s } else { "unknown".into() };
-        if matches!(self.peek(), Token::Colon) { self.advance(); }
-        let type_str = self.collect_type();
-
-        self.push(&format!("{} {}", type_str, var_name));
-    }
-
-    fn translate_fn(&mut self, qualifier: Option<&str>) {
-        let name = if let Token::Ident(s) = self.advance() { s } else { "unknown".into() };
-        let args = self.collect_parens();
-        let ret_type = if matches!(self.peek(), Token::Arrow) {
-            self.advance();
-            self.collect_type()
-        } else {
-            "void".to_string()
-        };
-
-        match qualifier {
-            Some(q) => self.push(&format!("{} {} {}({})", q, ret_type, name, args)),
-            None    => self.push(&format!("{} {}({})", ret_type, name, args)),
-        }
-    }
-
-    fn translate_struct(&mut self) {
-        let name = if let Token::Ident(s) = self.advance() { s } else { "Unknown".into() };
-        self.push(&format!("struct {} ", name));
-    }
-
-    pub fn translate(&mut self) -> String {
-        self.push("#include <metal_stdlib>\n");
-        self.push("using namespace metal;\n\n");
-
-        let mut qualifier: Option<String> = None;
-
-        loop {
-            match self.peek() {
-                Token::Eof => break,
-
-                Token::At => {
-                    self.advance();
-                    qualifier = match self.peek() {
-                        Token::Vertex   => { self.advance(); Some("vertex".into()) }
-                        Token::Fragment => { self.advance(); Some("fragment".into()) }
-                        Token::Kernel   => { self.advance(); Some("kernel".into()) }
-                        _ => None,
-                    };
-                }
-
-                Token::Fn => {
-                    self.advance();
-                    let q = qualifier.take();
-                    self.push_indent();
-                    self.translate_fn(q.as_deref());
-                    self.push(" ");
-                }
-
-                Token::Let => {
-                    self.advance();
-                    self.push_indent();
-                    self.translate_let();
-                }
-
-                Token::Struct => {
-                    self.advance();
-                    self.push_indent();
-                    self.translate_struct();
-                }
-
-                Token::Import => {
-                    self.advance();
-                    if let Token::StrLit(path) = self.advance() {
-                        self.push(&format!("#include \"{}\"\n", path));
-                    }
-                }
-
-                Token::LBrace => {
-                    self.advance();
-                    self.push("{\n");
-                    self.indent += 1;
-                }
-
-                Token::RBrace => {
-                    self.advance();
-                    self.indent = self.indent.saturating_sub(1);
-                    self.push_indent();
-                    self.push("}\n");
-                }
-
-                Token::Semicolon => {
-                    self.advance();
-                    self.push(";\n");
-                }
-
-                tok => {
-                    let out = match &tok {
-                        Token::Ident(s)    => s.clone(),
-                        Token::IntLit(n)   => n.to_string(),
-                        Token::FloatLit(f) => f.to_string(),
-                        Token::BoolLit(b)  => b.to_string(),
-                        Token::StrLit(s)   => format!("\"{}\"", s),
-                        other => Self::token_to_metal(other).unwrap_or("").to_string(),
-                    };
-                    if !out.is_empty() {
-                        self.push(" ");
-                        self.push(&out);
-                    }
-                    self.advance();
-                }
-            }
-        }
-
-        self.output.clone()
-    }
-}*/
-
-// ── 파일 I/O ───────────────────────────────────────────────
-
-
-
-// ── main ───────────────────────────────────────────────────
-
-/*fn main() {
-    // .slvt 파일 읽기
-    let src = fs::read_to_string("examples/test.slvt")
-        .unwrap_or_else(|_| {
-            // 파일 없으면 인라인 테스트 소스 사용
-            r#"
-@vertex
-fn vs_main(pos: float4, uv: float2) -> float4 {
-    let result: float4 = pos;
-    return result;
-}
-
-@fragment
-fn fs_main(color: float4) -> float4 {
-    return color;
-}
-            "#.to_string()
-        });
-
-    // Lexer → Token
-    let tokens = match Lexer::new(&src).tokenize() {
-        Ok(t)  => t,
-        Err(e) => { eprintln!("Lex error: {}", e); return; }
-    };
-
-    // Token → Metal
-    let metal_src = Translator::new(tokens).translate();
-
-    // 출력
-    println!("{}", metal_src);
-    write_file("./out", "output.metal", &metal_src);
-}*/
+// ── 진입점 ──────────────────────────────────────────────────
 
 fn main() {
-    // .slvt 파일 읽기 (없으면 인라인 테스트)
-    let src = fs::read_to_string("examples/test1.slvt")
-        .unwrap();
+    let cli = Cli::parse();
 
-    match compile(&src) {
-        Ok(metal) => {
-            println!("{}", metal);
-            write_file("./out", "output.metal", &metal);
+    match cli.command {
+        // ── salvation run — fn main 필수 ──────────────────
+        Commands::Run { file, output, verbose } => {
+            let src = read_file(&file);
+            eprintln!("{} {}", "컴파일 (실행 모드):".cyan().bold(), file);
+
+            match compile(&src, verbose) {
+                Ok(out) => {
+                    // fn main 없으면 run 불가
+                    if !out.has_main {
+                        eprintln!(
+                            "\n{} 이 파일은 라이브러리 모드입니다 (fn main 없음).\n\
+                             실행하려면 fn main()을 추가하거나, {} 를 사용하세요.",
+                            "오류:".red().bold(),
+                            "salvation build".yellow()
+                        );
+                        std::process::exit(1);
+                    }
+                    print_and_save(&out.metal_src, &output, &out_filename(&file));
+                }
+                Err(e) => { eprintln!("\n{}", e); std::process::exit(1); }
+            }
         }
-        Err(e) => eprintln!("Error: {}", e),
-    }
-    
-    unsafe {
-        let a = salvation_add(1, 1);
-        
-        println!("{}", a);
+
+        // ── salvation build — fn main 없어도 됨 ───────────
+        Commands::Build { file, output, verbose } => {
+            let src = read_file(&file);
+            eprintln!("{} {}", "컴파일 (라이브러리 모드):".cyan().bold(), file);
+
+            match compile(&src, verbose) {
+                Ok(out) => {
+                    if out.has_main {
+                        eprintln!("{}", "  fn main 감지 → 실행 가능 바이너리".dimmed());
+                    } else {
+                        eprintln!("{}", "  라이브러리 모드 → pub fn만 수출됩니다".dimmed());
+                    }
+                    print_and_save(&out.metal_src, &output, &out_filename(&file));
+                }
+                Err(e) => { eprintln!("\n{}", e); std::process::exit(1); }
+            }
+        }
+
+        // ── salvation check ────────────────────────────────
+        Commands::Check { file } => {
+            let src = read_file(&file);
+            eprintln!("{} {}", "검사:".cyan().bold(), file);
+
+            match check_only(&src) {
+                Ok(has_main) => {
+                    let mode = if has_main {
+                        "실행 모드 (fn main 있음)".green().to_string()
+                    } else {
+                        "라이브러리 모드 (fn main 없음)".yellow().to_string()
+                    };
+                    eprintln!("{} — {}", "이상 없음".green().bold(), mode);
+                }
+                Err(e) => { eprintln!("\n{}", e); std::process::exit(1); }
+            }
+        }
     }
 }
 
+// ── 공통 헬퍼 ───────────────────────────────────────────────
+
+fn read_file(path: &str) -> String {
+    match fs::read_to_string(path) {
+        Ok(s)  => s,
+        Err(e) => {
+            eprintln!("{} '{}': {}", "파일을 열 수 없습니다:".red().bold(), path, e);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn print_and_save(metal_src: &str, output_dir: &str, filename: &str) {
+    println!("{}", metal_src);
+    match write_output(output_dir, filename, metal_src) {
+        Ok(path) => eprintln!("{} {} {}", "완료".green().bold(), "→".green(), path),
+        Err(e)   => { eprintln!("{} {}", "출력 실패:".red().bold(), e); std::process::exit(1); }
+    }
+}

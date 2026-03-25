@@ -2,7 +2,7 @@ use crate::compiler::lexer::tokens::Token;
 use crate::compiler::lexer::Spanned;
 use crate::compiler::ast::types::*;
 use crate::compiler::ast::types::{
-    Type, BinOpKind, UnaryOpKind
+    Type, BinOpKind, UnaryOpKind, Backend,
 };
 
 pub struct Parser {
@@ -284,38 +284,123 @@ impl Parser {
     }
 
     fn parse_item(&mut self) -> Result<Item, String> {
+        // pub 여부 먼저 확인
+        let pub_export = self.eat(&Token::Pub);
+
         match self.peek().clone() {
-            // @vertex / @fragment / @kernel
+            // 어트리뷰트 파싱:
+            //   @backend(metal) @vertex fn foo()  — 백엔드 먼저, 스테이지 다음
+            //   @vertex fn foo()                  — 스테이지만 (백엔드는 상속)
+            //   @backend(metal) fn main()         — 백엔드만, main은 stage 불가
             Token::At => {
                 self.advance();
-                let stage = match self.peek() {
-                    Token::Vertex   => { self.advance(); Some(ShaderStage::Vertex) }
-                    Token::Fragment => { self.advance(); Some(ShaderStage::Fragment) }
-                    Token::Kernel   => { self.advance(); Some(ShaderStage::Kernel) }
-                    _ => None,
+                let first_attr = match self.advance() {
+                    Token::Ident(s)    => s,
+                    Token::Vertex      => "vertex".to_string(),
+                    Token::Fragment    => "fragment".to_string(),
+                    Token::Kernel      => "kernel".to_string(),
+                    _ => return Err("@ 뒤에 어트리뷰트 이름이 필요합니다".into()),
                 };
-                self.parse_fn(stage)
+
+                let mut backend: Option<Backend> = None;
+                let mut stage: Option<ShaderStage> = None;
+
+                if first_attr == "backend" {
+                    self.expect(&Token::LParen)?;
+                    let backend_name = if let Token::Ident(s) = self.advance() { s }
+                        else { return Err("@backend() 안에 백엔드 이름이 필요합니다 (metal/cuda/rocm/vulkan)".into()) };
+                    backend = Some(Backend::from_str(&backend_name)
+                        .ok_or_else(|| format!("알 수 없는 백엔드: '{}'. metal/cuda/rocm/vulkan 중 하나여야 합니다", backend_name))?);
+                    self.expect(&Token::RParen)?;
+
+                    if matches!(self.peek(), Token::At) {
+                        self.advance();
+                        let stage_attr = match self.advance() {
+                            Token::Ident(s)    => s,
+                            Token::Vertex      => "vertex".to_string(),
+                            Token::Fragment    => "fragment".to_string(),
+                            Token::Kernel      => "kernel".to_string(),
+                            _ => return Err("@ 뒤에 어트리뷰트 이름이 필요합니다".into()),
+                        };
+                        stage = Self::parse_stage_attr(&stage_attr)?;
+                    }
+                } else {
+                    stage = Self::parse_stage_attr(&first_attr)?;
+                }
+
+                self.parse_fn(pub_export, backend, stage)
             }
 
-            Token::Fn     => self.parse_fn(None),
-            Token::Struct => self.parse_struct(),
+            Token::Fn => self.parse_fn(pub_export, None, None),
+
+            Token::Struct => {
+                if pub_export {
+                    // pub struct — 나중에 지원 예정, 지금은 그냥 통과
+                }
+                self.parse_struct()
+            }
+
             Token::Import => {
                 self.advance();
                 if let Token::StrLit(path) = self.advance() {
                     Ok(Item::Import(path))
                 } else {
-                    Err("expected string path after import".into())
+                    Err("import 뒤에 문자열 경로가 필요합니다".into())
                 }
             }
 
-            t => Err(format!("unexpected token at top level: {:?}", t)),
+            t => Err(format!("최상위 선언 예상, {:?} 발견", t)),
         }
     }
 
-    fn parse_fn(&mut self, stage: Option<ShaderStage>) -> Result<Item, String> {
+    fn parse_stage_attr(name: &str) -> Result<Option<ShaderStage>, String> {
+        match name {
+            "vertex"   => Ok(Some(ShaderStage::Vertex)),
+            "fragment" => Ok(Some(ShaderStage::Fragment)),
+            "kernel"   => Ok(Some(ShaderStage::Kernel)),
+            other => Err(format!("알 수 없는 어트리뷰트: '@{}'. vertex/fragment/kernel/backend 중 하나여야 합니다", other)),
+        }
+    }
+
+    fn parse_fn(&mut self, pub_export: bool, backend: Option<Backend>, stage: Option<ShaderStage>) -> Result<Item, String> {
         self.expect(&Token::Fn)?;
-        let name = if let Token::Ident(s) = self.advance() { s }
-                   else { return Err("expected function name".into()) };
+
+        // 함수 이름 파싱 — main은 Token::Main으로 따로 들어옴
+        let (name, is_main) = match self.peek().clone() {
+            Token::Main => {
+                self.advance();
+
+                // main에 @vertex/@fragment/@kernel 붙으면 에러
+                if stage.is_some() {
+                    return Err(
+                        "fn main()은 host-side 진입점이라 @vertex/@fragment/@kernel을 사용할 수 없습니다. \
+                         스테이지 어트리뷰트를 제거하세요.".into()
+                    );
+                }
+
+                // main에 @backend 없으면 에러
+                if backend.is_none() {
+                    return Err(
+                        "fn main()에는 @backend(metal/cuda/rocm/vulkan) 어트리뷰트가 필요합니다.".into()
+                    );
+                }
+
+                // pub main은 허용하지 않음 — main은 항상 진입점
+                if pub_export {
+                    return Err(
+                        "fn main()은 진입점이라 pub으로 수출할 수 없습니다.".into()
+                    );
+                }
+
+                ("main".to_string(), true)
+            }
+            Token::Ident(s) => {
+                self.advance();
+                (s, false)
+            }
+            _ => return Err("함수 이름이 필요합니다".into()),
+        };
+
         let params = self.parse_params()?;
         let ret_ty = if self.eat(&Token::Arrow) {
             Some(self.parse_type()?)
@@ -323,7 +408,7 @@ impl Parser {
             None
         };
         let body = self.parse_block()?;
-        Ok(Item::FnDecl { stage, name, params, ret_ty, body })
+        Ok(Item::FnDecl { pub_export, is_main, backend, stage, name, params, ret_ty, body })
     }
 
     fn parse_struct(&mut self) -> Result<Item, String> {

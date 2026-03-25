@@ -135,11 +135,41 @@ pub struct Param {
 }
 
 // 어트리뷰트  @vertex / @fragment / @kernel
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ShaderStage {
     Vertex,
     Fragment,
     Kernel,
+}
+
+// 백엔드 타겟  @backend(metal) / @backend(cuda) / ...
+#[derive(Debug, Clone, PartialEq)]
+pub enum Backend {
+    Metal,
+    Cuda,
+    Rocm,
+    Vulkan,
+}
+
+impl Backend {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "metal"  => Some(Backend::Metal),
+            "cuda"   => Some(Backend::Cuda),
+            "rocm"   => Some(Backend::Rocm),
+            "vulkan" => Some(Backend::Vulkan),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Backend::Metal  => "metal",
+            Backend::Cuda   => "cuda",
+            Backend::Rocm   => "rocm",
+            Backend::Vulkan => "vulkan",
+        }
+    }
 }
 
 // 최상위 선언들
@@ -147,6 +177,9 @@ pub enum ShaderStage {
 pub enum Item {
     // fn name(args) -> RetType { body }
     FnDecl {
+        pub_export: bool,           // pub fn — 라이브러리 모드 수출
+        is_main: bool,              // fn main — host-side 진입점 예약어
+        backend: Option<Backend>,   // @backend(metal) — None이면 호출 그래프에서 상속
         stage: Option<ShaderStage>,
         name: String,
         params: Vec<Param>,

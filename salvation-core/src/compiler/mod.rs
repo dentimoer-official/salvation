@@ -1,4 +1,5 @@
 pub mod ast;
+pub mod backend_resolver;
 pub mod cache;
 pub mod codegen;
 pub mod error;

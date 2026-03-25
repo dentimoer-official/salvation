@@ -18,15 +18,10 @@ pub enum Token {
     Buffer,
     Texture2D,
     Sampler,
-    
-    // Main 선언
-    Main,
-    
-    // main 함수로 실행 시 __global__ 처럼 범위 선언 문 사용 하듯 쉽게 백엔드 선택 가능하게 하는 키워드
-    BackendMetal,
-    BackendRocm,
-    BackendCuda,
-    BackendVulkan,
+
+    // 진입점 / 가시성
+    Main,  // 예약어 — host-side 진입점
+    Pub,   // 라이브러리 모드에서 함수 수출 선언
 
     // 구문으로 쓸 애들
     Let,
