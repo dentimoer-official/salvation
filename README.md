@@ -33,6 +33,21 @@ Please note that the project will enter a temporary hibernation period due to th
 
 *During the hibernation period, major updates may be paused, but the repository will remain open for community contributions and forks.*
 
+---
+
+## 🏗 [Quick Start]
+> **To experience the power of **Salvation**, follow the steps below to set up your environment and run your first GPU-accelerated program.**
+
+### 1. Environment Setup
+* **Target OS:** macOS (Metal), Linux (Planned)
+* **Required:** Rust Toolchain & Xcode Command Line Tools
+
+```salvation
+git clone [https://github.com/yourusername/salvation.git](https://github.com/yourusername/salvation.git)
+cd salvation
+cargo run -- run examples/test1.slvt
+```
+
 ## ✉️ Contact
 For detailed inquiries, technical discussions, or collaboration, please reach out via email:
 **[dentimoer@icloud.com](mailto:dentimoer@icloud.com)**

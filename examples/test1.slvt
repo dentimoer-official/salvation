@@ -1,10 +1,22 @@
-@backend(metal)
-fn main() {
-    // host-side 진입점: GPU 커널 디스패치
+// ── struct (common.h의 FrameUniforms로 생성됨) ────────────────
+struct FrameUniforms {
+    projectionViewModel: mat4x4,
 }
 
+// ── host-side 진입점 ──────────────────────────────────────────
+@backend(metal)
+fn main() {
+    // salvation이 자동으로 Metal 보일러플레이트를 생성해 실행합니다
+}
+
+// ── vertex shader ─────────────────────────────────────────────
 @backend(metal) @vertex
-fn vs_main(pos: float4, uv: float2) -> float4 {
-    let result: float4 = pos;
-    return result;
+fn vert(position: float4, color: float4) -> float4 {
+    return position;
+}
+
+// ── fragment shader ───────────────────────────────────────────
+@backend(metal) @fragment
+fn frag(color: float4) -> float4 {
+    return color;
 }

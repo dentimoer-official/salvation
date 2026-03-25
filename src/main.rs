@@ -9,15 +9,17 @@ use salvation_core::compiler::parser::parser_testing::Parser;
 use salvation_core::compiler::backend_resolver::BackendResolver;
 use salvation_metal::checker::Checker;
 use salvation_metal::codegen::Codegen;
+use salvation_metal::host_gen;
+use salvation_metal::runtime;
 
-// ── CLI 정의 ────────────────────────────────────────────────
+// ── CLI ─────────────────────────────────────────────────────
 
 #[derive(ClapParser)]
 #[command(
     name    = "salvation",
     version = "0.1.0",
     author  = "dentimoer-official <dentimoer@icloud.com>",
-    about   = "Salvation GPU language compiler",
+    about   = "Salvation GPU language compiler & runner",
 )]
 struct Cli {
     #[command(subcommand)]
@@ -26,9 +28,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// .slvt 파일을 컴파일하고 결과를 출력합니다 (fn main 필요)
+    /// .slvt 컴파일 → shaders.metal + common.h + main.mm 생성 후 즉시 실행
+    /// fn main() 이 있어야 합니다
     Run {
-        /// 컴파일할 .slvt 파일 경로
         #[arg(value_name = "FILE")]
         file: String,
 
@@ -36,29 +38,25 @@ enum Commands {
         #[arg(short, long, default_value = "./out")]
         output: String,
 
-        /// 상세 출력 모드
+        /// 상세 로그
         #[arg(short, long)]
         verbose: bool,
     },
 
-    /// .slvt 파일을 라이브러리로 빌드합니다 (fn main 없어도 됨)
+    /// .slvt 컴파일 → 파일 생성만 (실행 안 함)
     Build {
-        /// 컴파일할 .slvt 파일 경로
         #[arg(value_name = "FILE")]
         file: String,
 
-        /// 출력 디렉터리 (기본값: ./out)
         #[arg(short, long, default_value = "./out")]
         output: String,
 
-        /// 상세 출력 모드
         #[arg(short, long)]
         verbose: bool,
     },
 
-    /// .slvt 파일 문법/백엔드 검사만 수행합니다 (파일 생성 없음)
+    /// 문법/백엔드 검사만 (파일 생성 없음)
     Check {
-        /// 검사할 .slvt 파일 경로
         #[arg(value_name = "FILE")]
         file: String,
     },
@@ -67,20 +65,22 @@ enum Commands {
 // ── 컴파일 파이프라인 ────────────────────────────────────────
 
 struct CompileOutput {
-    metal_src: String,
-    has_main:  bool,
+    metal_src:  String,
+    common_h:   String,
+    main_mm:    String,
+    has_main:   bool,
 }
 
-fn compile(src: &str, verbose: bool) -> Result<CompileOutput, String> {
-    if verbose { eprintln!("{}", "  [1/4] 렉싱...".dimmed()); }
+fn compile(src: &str, verbose: bool, metallib_name: &str) -> Result<CompileOutput, String> {
+    step(verbose, 1, 5, "렉싱");
     let tokens = Lexer::new(src).tokenize()
         .map_err(|e| format!("{} {}", "렉서 오류:".red().bold(), e))?;
 
-    if verbose { eprintln!("{}", "  [2/4] 파싱...".dimmed()); }
+    step(verbose, 2, 5, "파싱");
     let ast = Parser::new(tokens).parse()
         .map_err(|e| format!("{} {}", "파서 오류:".red().bold(), e))?;
 
-    if verbose { eprintln!("{}", "  [3/4] 백엔드 리졸빙...".dimmed()); }
+    step(verbose, 3, 5, "백엔드 리졸빙");
     let resolved = BackendResolver::new().resolve(ast)
         .map_err(|errs| {
             errs.iter()
@@ -89,7 +89,7 @@ fn compile(src: &str, verbose: bool) -> Result<CompileOutput, String> {
                 .join("\n")
         })?;
 
-    if verbose { eprintln!("{}", "  [4/4] 의미 검사...".dimmed()); }
+    step(verbose, 4, 5, "의미 검사");
     Checker::new().check(&resolved.program)
         .map_err(|errs| {
             errs.iter()
@@ -98,18 +98,29 @@ fn compile(src: &str, verbose: bool) -> Result<CompileOutput, String> {
                 .join("\n")
         })?;
 
+    step(verbose, 5, 5, "코드 생성");
+
+    // shaders.metal
     let metal_src = Codegen::new().generate(&resolved.program);
 
-    Ok(CompileOutput { metal_src, has_main: resolved.has_main })
+    // common.h + main.mm — AST 분석 후 생성
+    let info      = host_gen::analyze(&resolved.program);
+    let common_h  = host_gen::gen_common_h(&info);
+    let main_mm   = host_gen::gen_main_mm(&info, metallib_name);
+
+    Ok(CompileOutput {
+        metal_src,
+        common_h,
+        main_mm,
+        has_main: resolved.has_main,
+    })
 }
 
 fn check_only(src: &str) -> Result<bool, String> {
-    let tokens = Lexer::new(src).tokenize()
+    let tokens   = Lexer::new(src).tokenize()
         .map_err(|e| format!("{} {}", "렉서 오류:".red().bold(), e))?;
-
-    let ast = Parser::new(tokens).parse()
+    let ast      = Parser::new(tokens).parse()
         .map_err(|e| format!("{} {}", "파서 오류:".red().bold(), e))?;
-
     let resolved = BackendResolver::new().resolve(ast)
         .map_err(|errs| {
             errs.iter()
@@ -117,28 +128,33 @@ fn check_only(src: &str) -> Result<bool, String> {
                 .collect::<Vec<_>>()
                 .join("\n")
         })?;
-
     Ok(resolved.has_main)
 }
 
 // ── 파일 출력 ───────────────────────────────────────────────
 
-fn write_output(output_dir: &str, filename: &str, content: &str) -> Result<String, String> {
-    let path = Path::new(output_dir).join(filename);
-    fs::create_dir_all(output_dir)
-        .map_err(|e| format!("출력 디렉터리 생성 실패: {}", e))?;
+fn write(dir: &str, name: &str, content: &str) -> Result<String, String> {
+    let path = Path::new(dir).join(name);
+    fs::create_dir_all(dir)
+        .map_err(|e| format!("디렉터리 생성 실패: {}", e))?;
     fs::write(&path, content)
         .map_err(|e| format!("파일 쓰기 실패: {}", e))?;
     Ok(path.to_string_lossy().into_owned())
 }
 
-fn out_filename(file: &str) -> String {
-    let stem = Path::new(file)
-        .file_stem()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned();
-    format!("{}.metal", stem)
+fn write_all(out: &CompileOutput, dir: &str, stem: &str) -> Result<(), String> {
+    let metal = write(dir, &format!("{}.metal", stem), &out.metal_src)?;
+    let common = write(dir, "common.h", &out.common_h)?;
+    let main_mm = write(dir, "main.mm", &out.main_mm)?;
+    eprintln!("  {} {}", "→".green(), metal);
+    eprintln!("  {} {}", "→".green(), common);
+    eprintln!("  {} {}", "→".green(), main_mm);
+    // shaders.metal을 항상 shaders.metal로 심볼릭하거나 복사
+    // (xcrun은 shaders.metal을 직접 읽기 때문에)
+    if stem != "shaders" {
+        let _ = write(dir, "shaders.metal", &out.metal_src);
+    }
+    Ok(())
 }
 
 // ── 진입점 ──────────────────────────────────────────────────
@@ -147,48 +163,71 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        // ── salvation run — fn main 필수 ──────────────────
         Commands::Run { file, output, verbose } => {
-            let src = read_file(&file);
-            eprintln!("{} {}", "컴파일 (실행 모드):".cyan().bold(), file);
+            let src  = read_file(&file);
+            let stem = file_stem(&file);
 
-            match compile(&src, verbose) {
+            eprintln!("{} {}", "컴파일:".cyan().bold(), file);
+
+            match compile(&src, verbose, "shaders.metallib") {
                 Ok(out) => {
-                    // fn main 없으면 run 불가
                     if !out.has_main {
                         eprintln!(
-                            "\n{} 이 파일은 라이브러리 모드입니다 (fn main 없음).\n\
-                             실행하려면 fn main()을 추가하거나, {} 를 사용하세요.",
+                            "\n{} fn main()이 없습니다. \
+                             라이브러리 모드 파일은 {} 를 사용하세요.",
                             "오류:".red().bold(),
                             "salvation build".yellow()
                         );
                         std::process::exit(1);
                     }
-                    print_and_save(&out.metal_src, &output, &out_filename(&file));
-                }
-                Err(e) => { eprintln!("\n{}", e); std::process::exit(1); }
-            }
-        }
 
-        // ── salvation build — fn main 없어도 됨 ───────────
-        Commands::Build { file, output, verbose } => {
-            let src = read_file(&file);
-            eprintln!("{} {}", "컴파일 (라이브러리 모드):".cyan().bold(), file);
-
-            match compile(&src, verbose) {
-                Ok(out) => {
-                    if out.has_main {
-                        eprintln!("{}", "  fn main 감지 → 실행 가능 바이너리".dimmed());
-                    } else {
-                        eprintln!("{}", "  라이브러리 모드 → pub fn만 수출됩니다".dimmed());
+                    if let Err(e) = write_all(&out, &output, &stem) {
+                        eprintln!("{} {}", "파일 출력 실패:".red().bold(), e);
+                        std::process::exit(1);
                     }
-                    print_and_save(&out.metal_src, &output, &out_filename(&file));
+
+                    eprintln!("{}", "빌드 & 실행:".cyan().bold());
+                    let out_path = Path::new(&output);
+
+                    if let Err(e) = runtime::build_and_run(out_path) {
+                        eprintln!("{} {}", "실행 오류:".red().bold(), e);
+                        std::process::exit(1);
+                    }
                 }
                 Err(e) => { eprintln!("\n{}", e); std::process::exit(1); }
             }
         }
 
-        // ── salvation check ────────────────────────────────
+        Commands::Build { file, output, verbose } => {
+            let src  = read_file(&file);
+            let stem = file_stem(&file);
+
+            eprintln!("{} {}", "빌드:".cyan().bold(), file);
+
+            match compile(&src, verbose, "shaders.metallib") {
+                Ok(out) => {
+                    if let Err(e) = write_all(&out, &output, &stem) {
+                        eprintln!("{} {}", "파일 출력 실패:".red().bold(), e);
+                        std::process::exit(1);
+                    }
+
+                    let out_path = Path::new(&output);
+                    match runtime::build_only(out_path) {
+                        Ok(metallib) => eprintln!(
+                            "{} {} {}",
+                            "완료".green().bold(), "→".green(),
+                            metallib.display()
+                        ),
+                        Err(e) => {
+                            eprintln!("{} {}", "셰이더 빌드 실패:".red().bold(), e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Err(e) => { eprintln!("\n{}", e); std::process::exit(1); }
+            }
+        }
+
         Commands::Check { file } => {
             let src = read_file(&file);
             eprintln!("{} {}", "검사:".cyan().bold(), file);
@@ -208,7 +247,7 @@ fn main() {
     }
 }
 
-// ── 공통 헬퍼 ───────────────────────────────────────────────
+// ── 헬퍼 ────────────────────────────────────────────────────
 
 fn read_file(path: &str) -> String {
     match fs::read_to_string(path) {
@@ -220,10 +259,16 @@ fn read_file(path: &str) -> String {
     }
 }
 
-fn print_and_save(metal_src: &str, output_dir: &str, filename: &str) {
-    println!("{}", metal_src);
-    match write_output(output_dir, filename, metal_src) {
-        Ok(path) => eprintln!("{} {} {}", "완료".green().bold(), "→".green(), path),
-        Err(e)   => { eprintln!("{} {}", "출력 실패:".red().bold(), e); std::process::exit(1); }
+fn file_stem(path: &str) -> String {
+    Path::new(path)
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn step(verbose: bool, n: u8, total: u8, label: &str) {
+    if verbose {
+        eprintln!("{}", format!("  [{}/{}] {}...", n, total, label).dimmed());
     }
 }

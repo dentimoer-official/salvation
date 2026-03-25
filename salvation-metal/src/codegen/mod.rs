@@ -8,11 +8,19 @@ use salvation_core::compiler::ast::types::{
 pub struct Codegen {
     output: String,
     indent: usize,
+    /// vertex/fragment 함수 내부에서 파라미터 이름 → "prefix.이름" 으로 변환
+    stage_in_params: Vec<String>,
+    stage_in_prefix: String,  // vertex: "in", fragment: "out"
 }
 
 impl Codegen {
     pub fn new() -> Self {
-        Codegen { output: String::new(), indent: 0 }
+        Codegen {
+            output: String::new(),
+            indent: 0,
+            stage_in_params: Vec::new(),
+            stage_in_prefix: String::new(),
+        }
     }
 
     // ── 유틸 ───────────────────────────────────────────────
@@ -87,7 +95,13 @@ impl Codegen {
             Expr::IntLit(n)   => self.push(&n.to_string()),
             Expr::FloatLit(f) => self.push(&f.to_string()),
             Expr::BoolLit(b)  => self.push(if *b { "true" } else { "false" }),
-            Expr::Ident(s)    => self.push(s),
+            Expr::Ident(s) => {
+                if self.stage_in_params.contains(s) {
+                    self.push(&format!("{}.{}", self.stage_in_prefix, s));
+                } else {
+                    self.push(s);
+                }
+            }
 
             Expr::BinOp { op, lhs, rhs } => {
                 self.push("(");
@@ -247,29 +261,130 @@ impl Codegen {
             }
 
             // fn / @vertex fn / @fragment fn / @kernel fn
-            Item::FnDecl { backend, stage, name, params, ret_ty, body, .. } => {
-                // @vertex / @fragment / @kernel
-                if let Some(s) = stage {
-                    let stage_str = match s {
-                        ShaderStage::Vertex   => "vertex",
-                        ShaderStage::Fragment => "fragment",
-                        ShaderStage::Kernel   => "kernel",
-                    };
-                    self.push(&format!("{} ", stage_str));
+            Item::FnDecl { is_main, stage, name, params, ret_ty, body, .. } => {
+                // fn main()은 host-side 진입점 — Metal 셰이더에 출력하지 않음
+                if *is_main {
+                    return;
                 }
 
-                // 반환 타입 (없으면 void)
-                let ret_str = ret_ty
-                    .as_ref()
-                    .map(|t| self.emit_type(t))
-                    .unwrap_or_else(|| "void".into());
+                match stage {
+                    Some(ShaderStage::Vertex) => {
+                        let in_struct  = format!("{}In",  capitalize(name));
+                        let out_struct = format!("{}Out", capitalize(name));
 
-                // 인자  →  Type name 순서로
-                let params_str = self.emit_params(params);
+                        // VertIn struct — 입력 속성
+                        self.push(&format!("struct {} {{\n", in_struct));
+                        for (i, p) in params.iter().enumerate() {
+                            let ty_str = self.emit_type(&p.ty);
+                            self.push(&format!(
+                                "    {} {} [[attribute({})]];\n",
+                                ty_str, p.name, i
+                            ));
+                        }
+                        self.push("};\n\n");
 
-                self.push(&format!("{} {}({}) ", ret_str, name, params_str));
-                self.emit_block(body);
-                self.newline();
+                        // VertOut struct — vertex → fragment 전달
+                        // 첫 번째 파라미터는 [[position]], 나머지는 일반 필드
+                        self.push(&format!("struct {} {{\n", out_struct));
+                        for (i, p) in params.iter().enumerate() {
+                            let ty_str = self.emit_type(&p.ty);
+                            if i == 0 {
+                                self.push(&format!(
+                                    "    {} {} [[position]];\n",
+                                    ty_str, p.name
+                                ));
+                            } else {
+                                self.push(&format!("    {} {};\n", ty_str, p.name));
+                            }
+                        }
+                        self.push("};\n\n");
+
+                        // vertex 함수 — VertOut을 반환
+                        self.push(&format!(
+                            "vertex {} {}({} in [[stage_in]], constant FrameUniforms& uniforms [[buffer(1)]]) {{\n",
+                            out_struct, name, in_struct
+                        ));
+                        self.indent += 1;
+
+                        // VertOut out; 선언
+                        self.push_indent();
+                        self.push(&format!("{} out;\n", out_struct));
+
+                        // out.field = in.field; 자동 할당
+                        for p in params.iter() {
+                            self.push_indent();
+                            self.push(&format!("out.{} = in.{};\n", p.name, p.name));
+                        }
+
+                        // .slvt body 내의 return 구문 처리
+                        // body에 return이 있으면 out.position 덮어쓰기로 변환
+                        self.stage_in_prefix = "in".to_string();
+                        self.stage_in_params = params.iter().map(|p| p.name.clone()).collect();
+                        for stmt in body {
+                            match stmt {
+                                Stmt::Return(Some(expr)) => {
+                                    // return expr → out.position = expr; return out;
+                                    self.push_indent();
+                                    self.push("out.");
+                                    self.push(&params.first().map(|p| p.name.as_str()).unwrap_or("position").to_string());
+                                    self.push(" = ");
+                                    self.emit_expr(expr);
+                                    self.push(";\n");
+                                }
+                                other => self.emit_stmt(other),
+                            }
+                        }
+                        self.stage_in_params.clear();
+                        self.stage_in_prefix.clear();
+
+                        self.push_indent();
+                        self.push("return out;\n");
+                        self.indent -= 1;
+                        self.push("}\n\n");
+                    }
+
+                    Some(ShaderStage::Fragment) => {
+                        let ret_str = ret_ty
+                            .as_ref()
+                            .map(|t| self.emit_type(t))
+                            .unwrap_or_else(|| "void".into());
+
+                        let frag_param = if params.len() == 1 {
+                            "VertOut out [[stage_in]]".to_string()
+                        } else {
+                            self.emit_params(params)
+                        };
+
+                        self.push(&format!("fragment {} {}({}) ", ret_str, name, frag_param));
+
+                        // fragment body에서 파라미터 이름을 out.이름으로 변환
+                        self.stage_in_prefix = "out".to_string();
+                        self.stage_in_params = params.iter().map(|p| p.name.clone()).collect();
+                        self.emit_block(body);
+                        self.stage_in_params.clear();
+                        self.stage_in_prefix.clear();
+
+                        self.newline();
+                    }
+
+                    Some(ShaderStage::Kernel) => {
+                        let params_str = self.emit_params(params);
+                        self.push(&format!("kernel void {}({}) ", name, params_str));
+                        self.emit_block(body);
+                        self.newline();
+                    }
+
+                    None => {
+                        let ret_str = ret_ty
+                            .as_ref()
+                            .map(|t| self.emit_type(t))
+                            .unwrap_or_else(|| "void".into());
+                        let params_str = self.emit_params(params);
+                        self.push(&format!("{} {}({}) ", ret_str, name, params_str));
+                        self.emit_block(body);
+                        self.newline();
+                    }
+                }
             }
         }
     }
@@ -286,5 +401,13 @@ impl Codegen {
         }
 
         self.output.clone()
+    }
+}
+
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        None    => String::new(),
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
     }
 }
