@@ -2,6 +2,7 @@
 - objective-c ffi 보강
 - shader 생성 가능 예제 만들기
 - lexer 보강
+- salvation 실행 과정에서 발생한 문제 정리(주로 코드쪽)
 
 2026.03.19
 - codegen 완성 (보강 예정)
