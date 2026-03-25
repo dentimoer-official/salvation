@@ -1,6 +1,7 @@
 2026.03.25
 - objective-c ffi 보강
 - shader 생성 가능 예제 만들기
+- lexer 보강
 
 2026.03.19
 - codegen 완성 (보강 예정)

@@ -13,7 +13,7 @@ pub mod word_check;
 // codegen 이전에 한 번만 돌리면 모든 백엔드가 검증된 AST를 받음
 
 use std::collections::HashMap;
-use salvation_core::compiler::ast::ast_testing::{
+use salvation_core::compiler::ast::types::{
     Block, BinOpKind, Expr, Item, Program, Stmt, Type, UnaryOpKind,
 };
 

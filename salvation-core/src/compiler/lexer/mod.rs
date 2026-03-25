@@ -135,6 +135,13 @@ impl Lexer {
             "type" => Token::Type,
             "uniform" => Token::Uniform,
             "vertex" => Token::Vertex,
+            
+            // main 함수로 실행 시 __global__ 처럼 범위 선언 문 사용 하듯 쉽게 백엔드 선택 가능하게 하는 키워드
+            "main" => Token::Main,
+            "__metal__" => Token::BackendMetal,
+            "__rocm__" => Token::BackendRocm,
+            "__cuda__" => Token::BackendCuda,
+            "__vulkan__" => Token::BackendVulkan,
 
             // 구문 키워드
             "else" => Token::Else,

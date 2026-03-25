@@ -1,7 +1,7 @@
 // codegen.rs
 // AST (ast_testing) → Metal 소스코드 생성
 
-use crate::compiler::ast::ast_testing::{
+use crate::compiler::ast::types::{
     Block, BinOpKind, Expr, Item, Param, Program, ShaderStage, Stmt, Type, UnaryOpKind,
 };
 
@@ -49,7 +49,13 @@ impl Codegen {
             Type::Mat4x2  => "float4x2".into(),
             Type::Mat4x3  => "float4x3".into(),
             Type::Mat4x4  => "float4x4".into(),
+            Type::Texture2D => "texture2d".into(),
+            Type::Sampler => "sampler".into(),
+            Type::Array { inner, size } => {
+                format!("array<{}, {}>", self.emit_type(inner), size)
+            }
             Type::Named(s) => s.clone(),
+            Type::Unit => "void".into(),
         }
     }
 

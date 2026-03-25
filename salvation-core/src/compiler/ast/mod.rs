@@ -1,7 +1,6 @@
 // 여기서는 lexer에서 만든 문법에 사용될 단어들을 어떻게 조립 될 수 있는지 정리할꺼임
 // 설명서 같은 역할 
 
-pub mod ast_testing;
 pub mod types;
 pub mod spaces;
 

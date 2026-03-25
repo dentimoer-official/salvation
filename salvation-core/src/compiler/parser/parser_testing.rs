@@ -1,7 +1,7 @@
 use crate::compiler::lexer::tokens::Token;
 use crate::compiler::lexer::Spanned;
-use crate::compiler::ast::ast_testing::*;
-use crate::compiler::ast::ast_testing::{
+use crate::compiler::ast::types::*;
+use crate::compiler::ast::types::{
     Type, BinOpKind, UnaryOpKind
 };
 
