@@ -1,6 +1,7 @@
 use salvation_core::compiler::lexer::Lexer;
 use salvation_core::compiler::lexer::tokens::Token;
 use salvation_core::compiler::lexer::Spanned;
+use salvation_metal::ffi::salvation_add;
 use std::fs;
 use std::path::Path;
 use salvation_metal::checker::Checker;
@@ -345,6 +346,12 @@ fn main() {
             write_file("./out", "output.metal", &metal);
         }
         Err(e) => eprintln!("Error: {}", e),
+    }
+    
+    unsafe {
+        let a = salvation_add(1, 1);
+        
+        println!("{}", a);
     }
 }
 

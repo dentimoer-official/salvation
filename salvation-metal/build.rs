@@ -1,35 +1,34 @@
 use std::{
-    env, fs, path::Path,
+    env, 
+    fs, 
+    path::Path,
 };
 
+type BuildResult = Result<(), Box<dyn std::error::Error>>;
+
 fn main() {
-    metal_manager().expect("Failed to build salvation to metal");
+    metal_manager().expect("Failed to build metal");
+    ffi_manager().expect("Failed to build ffi");
 }
 
 fn metal_manager() -> std::io::Result<()> {
-    // macOS일 때만 빌드
     if std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() != "macos" {
         return Ok(());
     }
 
     cc::Build::new()
         .file("src/ffi/metal_info.m")
-        .flag("-fobjc-arc")   // ARC 활성화
-        .compile("metal_info"); // libmetal_info.a 생성
+        .flag("-fobjc-arc")
+        .compile("metal_info");
 
-    // Metal 프레임워크 링크
     println!("cargo:rustc-link-lib=framework=Metal");
     println!("cargo:rustc-link-lib=framework=Foundation");
-
-    // .m 파일이 바뀌면 rebuild
     println!("cargo:rerun-if-changed=src/ffi/metal_info.m");
-    
-    // 여기서 부터 codegen
+
     let out_dir = env::var("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("generated.rs");
-    
     let mut code = String::new();
-    
+
     let config_items = vec![
         ("MAX_CONNECTIONS", "100u32"),
         ("TIMEOUT_MS", "5000u64"),
@@ -45,19 +44,66 @@ fn metal_manager() -> std::io::Result<()> {
         ));
     }
 
-    // 예: 구조체 자동 생성
     code.push_str("\n#[derive(Debug)]\n");
     code.push_str("pub struct AutoConfig {\n");
     for (name, _) in &config_items {
-        let field = name.to_lowercase();
-        code.push_str(&format!("    pub {}: &'static str,\n", field));
+        code.push_str(&format!("    pub {}: &'static str,\n", name.to_lowercase()));
     }
     code.push_str("}\n");
 
     fs::write(&dest_path, code).unwrap();
-
-    // 이 파일이 변경될 때만 재실행
     println!("cargo:rerun-if-changed=build.rs");
-    
+
+    Ok(())
+}
+
+fn ffi_manager() -> BuildResult {
+    if std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() != "macos" {
+        return Ok(());
+    }
+
+    // Objective-C 빌드
+    cc::Build::new()
+        .file("src/ffi/ffi_manager.m")
+        .flag("-fobjc-arc")
+        .flag("-fmodules")
+        .compile("ffi_manager");
+
+    // Objective-C++ 빌드
+    cc::Build::new()
+        .file("src/ffi/ffi_manager.mm")
+        .flag("-fobjc-arc")
+        .flag("-fmodules")
+        .flag("-std=c++17")     // C++ 표준 지정
+        .cpp(true)              // C++ 모드 활성화
+        .compile("ffi_manager_cpp");
+
+    println!("cargo:rustc-link-lib=framework=Foundation");
+    println!("cargo:rustc-link-lib=dylib=c++"); // libc++ 링크 (C++ 런타임)
+
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")?;
+    let header_path = format!("{}/src/ffi/ffi_manager.h", manifest_dir);
+
+    let target = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    let clang_target = match target.as_str() {
+        "aarch64" => "--target=aarch64-apple-macosx",
+        "x86_64"  => "--target=x86_64-apple-macosx",
+        _         => "--target=aarch64-apple-macosx",
+    };
+
+    let bindings = bindgen::Builder::default()
+        .header(&header_path)
+        .clang_arg(clang_target)
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .generate()
+        .map_err(|e| e.to_string())?;
+
+    let out_dir = env::var("OUT_DIR")?;
+    bindings.write_to_file(Path::new(&out_dir).join("ffi_manager_bindings.rs"))?;
+
+    println!("cargo:rerun-if-changed=src/ffi/ffi_manager.m");
+    println!("cargo:rerun-if-changed=src/ffi/ffi_manager.mm");
+    println!("cargo:rerun-if-changed=src/ffi/ffi_manager.h");
+
     Ok(())
 }

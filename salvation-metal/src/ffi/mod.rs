@@ -10,6 +10,13 @@ unsafe extern "C" {
     fn slvt_metal_has_unified_memory() -> bool;
 }
 
+unsafe extern "C" {
+    // SalvationFFI.h 에 선언된 함수들 여기에 직접 작성
+    // 예시 — 실제 SalvationFFI.h 내용에 맞게 수정
+    pub fn salvation_add(a: i32, b: i32) -> i32;
+    pub fn salvation_log(message: *const c_char);
+}
+
 pub fn is_supported() -> bool {
     #[cfg(target_os = "macos")]
     unsafe { slvt_metal_is_supported() }
