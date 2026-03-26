@@ -48,6 +48,9 @@ cd salvation
 cargo run -- run examples/test1.slvt
 ```
 
+## 🏳️ Preview
+
+
 ## ✉️ Contact
 For detailed inquiries, technical discussions, or collaboration, please reach out via email:
 **[dentimoer@icloud.com](mailto:dentimoer@icloud.com)**
