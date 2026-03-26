@@ -204,6 +204,50 @@ impl Parser {
                 Ok(expr)
             }
 
+            // 타입 생성자 호출: float4(x, y, z, w), float3x3(...), ...
+            // Metal / GLSL 에서 타입 키워드를 생성자처럼 쓰는 관용구를
+            // Expr::Call { name: "float4", args } 로 내려보냄.
+            // 주의: 외부 match가 self.peek().clone()을 직접 매칭하므로
+            //       tok 변수가 없음 → self.advance()로 토큰을 직접 꺼낸 뒤 내부 match.
+            Token::Float   | Token::Float2  | Token::Float3  | Token::Float4  |
+            Token::Int     | Token::Uint    | Token::Bool    |
+            Token::Mat2x2  | Token::Mat2x3  | Token::Mat2x4  |
+            Token::Mat3x2  | Token::Mat3x3  | Token::Mat3x4  |
+            Token::Mat4x2  | Token::Mat4x3  | Token::Mat4x4 => {
+                let type_tok = self.advance(); // 타입 토큰 소비 & 캡처
+                let name = match type_tok {
+                    Token::Float   => "float",
+                    Token::Float2  => "float2",
+                    Token::Float3  => "float3",
+                    Token::Float4  => "float4",
+                    Token::Int     => "int",
+                    Token::Uint    => "uint",
+                    Token::Bool    => "bool",
+                    Token::Mat2x2  => "float2x2",
+                    Token::Mat2x3  => "float2x3",
+                    Token::Mat2x4  => "float2x4",
+                    Token::Mat3x2  => "float3x2",
+                    Token::Mat3x3  => "float3x3",
+                    Token::Mat3x4  => "float3x4",
+                    Token::Mat4x2  => "float4x2",
+                    Token::Mat4x3  => "float4x3",
+                    Token::Mat4x4  => "float4x4",
+                    _ => unreachable!(),
+                }.to_string();
+                if matches!(self.peek(), Token::LParen) {
+                    self.advance(); // (
+                    let mut args = Vec::new();
+                    while !matches!(self.peek(), Token::RParen | Token::Eof) {
+                        args.push(self.parse_expr()?);
+                        self.eat(&Token::Comma);
+                    }
+                    self.expect(&Token::RParen)?;
+                    Ok(Expr::Call { name, args })
+                } else {
+                    Err(format!("타입 키워드 '{name}' 뒤에 '(' 가 필요해요 (생성자 문법: {name}(...))"))
+                }
+            }
+
             t => Err(format!("unexpected token in expression: {:?}", t)),
         }
     }

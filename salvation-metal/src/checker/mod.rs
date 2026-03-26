@@ -323,26 +323,60 @@ impl Checker {
 
     // Metal 내장 함수 허용 목록
     fn check_builtin(&mut self, name: &str, args: &[Expr]) -> Option<Type> {
+        // 모든 인자를 검사하는 클로저 (공통 패턴)
+        let check_all = |checker: &mut Checker, args: &[Expr]| {
+            for a in args { checker.check_expr(a); }
+        };
+
         match name {
-            "normalize" | "reflect" | "refract" => {
-                for a in args { self.check_expr(a); }
+            // ── 벡터/행렬 반환 ───────────────────────────────
+            "normalize" | "reflect" | "refract" | "cross" | "faceforward" => {
+                check_all(self, args);
                 Some(Type::Float3)
             }
-            "dot" | "length" | "distance" => {
-                for a in args { self.check_expr(a); }
+
+            // ── 스칼라 반환 ──────────────────────────────────
+            "dot" | "length" | "distance" | "determinant" => {
+                check_all(self, args);
                 Some(Type::Float)
             }
-            "cross" => {
-                for a in args { self.check_expr(a); }
-                Some(Type::Float3)
-            }
-            "abs" | "floor" | "ceil" | "fract" | "sqrt" | "saturate" | "clamp" | "mix" | "step" => {
-                for a in args { self.check_expr(a); }
+            "abs" | "floor" | "ceil" | "fract" | "sqrt" | "rsqrt"
+            | "saturate" | "clamp" | "mix" | "lerp" | "step" | "smoothstep"
+            | "min" | "max" | "pow" | "exp" | "exp2" | "log" | "log2"
+            | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "atan2"
+            | "sign" | "round" | "trunc" | "fmod" | "modf" | "mad" => {
+                check_all(self, args);
                 Some(Type::Float)
             }
-            "float2" => { for a in args { self.check_expr(a); } Some(Type::Float2) }
-            "float3" => { for a in args { self.check_expr(a); } Some(Type::Float3) }
-            "float4" => { for a in args { self.check_expr(a); } Some(Type::Float4) }
+
+            // ── 텍스처 샘플링 ─────────────────────────────────
+            // sample(tex, smp, uv) — Metal .sample() 메서드의 free-function 대용.
+            // 반환 타입은 float4 (RGBA 색상).
+            "sample" | "sampleLevel" | "sampleBias" | "sampleGrad" => {
+                check_all(self, args);
+                Some(Type::Float4)
+            }
+
+            // ── 타입 생성자 ──────────────────────────────────
+            // parse_primary에서 이미 Expr::Call로 내려보내므로 여기서도 처리.
+            "float"  | "int"  | "uint"  | "bool"  => {
+                check_all(self, args);
+                Some(Type::Float)
+            }
+            "float2" => { check_all(self, args); Some(Type::Float2) }
+            "float3" => { check_all(self, args); Some(Type::Float3) }
+            "float4" => { check_all(self, args); Some(Type::Float4) }
+            "float2x2" => { check_all(self, args); Some(Type::Mat2x2) }
+            "float3x3" => { check_all(self, args); Some(Type::Mat3x3) }
+            "float4x4" => { check_all(self, args); Some(Type::Mat4x4) }
+
+            // ── 원자/배리어 (Compute shader) ─────────────────
+            "atomic_fetch_add" | "atomic_fetch_sub" | "atomic_load" | "atomic_store"
+            | "threadgroup_barrier" | "simdgroup_barrier" => {
+                check_all(self, args);
+                Some(Type::Uint)
+            }
+
             _ => None,
         }
     }

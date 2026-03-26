@@ -11,11 +11,13 @@ use salvation_core::compiler::ast::types::{Item, Param, Program, ShaderStage, Ty
 
 #[derive(Debug, Default)]
 pub struct ShaderInfo {
-    pub vert_fn:   Option<String>,       // @vertex 함수명
-    pub frag_fn:   Option<String>,       // @fragment 함수명
-    pub uniforms:  Vec<UniformInfo>,     // uniform struct 목록
-    pub structs:   Vec<StructInfo>,      // 일반 struct 목록
-    pub vert_params: Vec<Param>,         // vertex 함수 파라미터
+    pub vert_fn:      Option<String>,    // @vertex 함수명
+    pub frag_fn:      Option<String>,    // @fragment 함수명
+    pub kernel_fn:    Option<String>,    // @kernel 함수명
+    pub uniforms:     Vec<UniformInfo>,  // uniform struct 목록
+    pub structs:      Vec<StructInfo>,   // 일반 struct 목록
+    pub vert_params:  Vec<Param>,        // vertex 함수 파라미터
+    pub kernel_params: Vec<Param>,       // kernel 함수 파라미터 (idx 포함 전체)
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +47,10 @@ pub fn analyze(program: &Program) -> ShaderInfo {
                     }
                     Some(ShaderStage::Fragment) => {
                         info.frag_fn = Some(name.clone());
+                    }
+                    Some(ShaderStage::Kernel) => {
+                        info.kernel_fn     = Some(name.clone());
+                        info.kernel_params = params.clone();
                     }
                     _ => {}
                 }
@@ -122,27 +128,178 @@ pub fn gen_common_h(info: &ShaderInfo) -> String {
     // 이전에는 common.h와 shaders.metal 양쪽에 중복 선언되어 유지보수 지옥이었음.
     out.push_str("#include \"shader_types.h\"\n\n");
 
-    // VertexAttributes enum — vertex 파라미터에서 추출
-    out.push_str("enum VertexAttributes {\n");
-    for (i, p) in info.vert_params.iter().enumerate() {
-        let variant = to_upper_camel("VertexAttribute", &p.name);
-        out.push_str(&format!("    {} = {},\n", variant, i));
-    }
-    out.push_str("};\n\n");
+    // compute 전용(@kernel만 있고 @vertex 없음)이면 render 관련 enum 불필요.
+    // 대신 빈 common.h만 생성해 main.mm의 #include "common.h" 가 깨지지 않게 한다.
+    let is_compute_only = info.kernel_fn.is_some() && info.vert_fn.is_none();
 
-    // BufferIndex enum
-    out.push_str("enum BufferIndex {\n");
-    out.push_str("    MeshVertexBuffer   = 0,\n");
-    out.push_str("    FrameUniformBuffer = 1,\n");
-    out.push_str("};\n\n");
+    if !is_compute_only {
+        // VertexAttributes enum — vertex 파라미터에서 추출.
+        // vert_params가 비어 있으면 gen_vertex_descriptor의 fallback과 동일한
+        // 기본값(Position=0, Color=1)을 emit해 이름이 undefined가 되지 않게 한다.
+        out.push_str("enum VertexAttributes {\n");
+        if info.vert_params.is_empty() {
+            out.push_str("    VertexAttributePosition = 0,\n");
+            out.push_str("    VertexAttributeColor    = 1,\n");
+        } else {
+            for (i, p) in info.vert_params.iter().enumerate() {
+                let variant = to_upper_camel("VertexAttribute", &p.name);
+                out.push_str(&format!("    {} = {},\n", variant, i));
+            }
+        }
+        out.push_str("};\n\n");
+
+        // BufferIndex enum
+        out.push_str("enum BufferIndex {\n");
+        out.push_str("    MeshVertexBuffer   = 0,\n");
+        out.push_str("    FrameUniformBuffer = 1,\n");
+        out.push_str("};\n\n");
+    }
 
     out.push_str("#endif /* COMMON_H */\n");
     out
 }
 
-// ── main.mm 생성 ──────────────────────────────────────────────
+// ── compute 전용 main.mm 생성 ────────────────────────────────
+// 윈도우/렌더 파이프라인 없이 커널만 실행 후 결과를 stdout에 출력한다.
+//
+// 버퍼 배치 규칙 (codegen/mod.rs 와 동일):
+//   - 첫 번째 uint 파라미터  → [[thread_position_in_grid]], 호스트 버퍼 없음
+//   - 그 외 uint 파라미터   → constant uint& [[buffer(n)]]  → 호스트: uint 상수 버퍼
+//   - float/float4/… 파라미터 → device T*   [[buffer(n)]]  → 호스트: float 배열 버퍼
+
+fn gen_main_mm_compute(info: &ShaderInfo, metallib_name: &str) -> String {
+    let kernel = info.kernel_fn.as_deref().unwrap_or("kernel_main");
+
+    // 첫 번째 uint(thread_position)를 제외한 실제 버퍼 파라미터만 추출
+    let mut first_uint_seen = false;
+    let buf_params: Vec<&Param> = info.kernel_params.iter().filter(|p| {
+        if matches!(p.ty, Type::Uint) && !first_uint_seen {
+            first_uint_seen = true;
+            false   // thread_position_in_grid — 호스트 버퍼 불필요
+        } else {
+            true
+        }
+    }).collect();
+
+    // 각 버퍼 파라미터에 대해 테스트 데이터 초기화 + setBuffer 코드 생성
+    let mut init_code   = String::new();
+    let mut bind_code   = String::new();
+    let mut print_code  = String::new();
+    let test_n: u32     = 8;  // 기본 테스트 원소 수
+
+    for (slot, p) in buf_params.iter().enumerate() {
+        let var = &p.name;
+        if matches!(p.ty, Type::Uint) {
+            // constant uint& — 원소 개수로 사용
+            init_code.push_str(&format!(
+                "        uint32_t {v}_val = {n};\n        id<MTLBuffer> {v}Buf = \
+                 [device newBufferWithBytes:&{v}_val length:sizeof(uint32_t) \
+                 options:MTLResourceStorageModeShared];\n",
+                v = var, n = test_n,
+            ));
+            bind_code.push_str(&format!(
+                "        [enc setBuffer:{v}Buf offset:0 atIndex:{s}];\n",
+                v = var, s = slot,
+            ));
+        } else {
+            // device float* — 테스트 데이터 [1..N]
+            let vals: String = (1..=test_n)
+                .map(|i| format!("{}.", i))
+                .collect::<Vec<_>>()
+                .join(", ");
+            init_code.push_str(&format!(
+                "        float {v}_data[] = {{ {vals} }};\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20uint32_t {v}_n = {n};\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20id<MTLBuffer> {v}Buf = [device newBufferWithBytes:{v}_data \
+                 length:sizeof({v}_data) options:MTLResourceStorageModeShared];\n",
+                v = var, vals = vals, n = test_n,
+            ));
+            bind_code.push_str(&format!(
+                "        [enc setBuffer:{v}Buf offset:0 atIndex:{s}];\n",
+                v = var, s = slot,
+            ));
+            print_code.push_str(&format!(
+                "        printf(\"[Salvation] {k} → {v} 결과:\\n\");\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20float* {v}_out = (float*){v}Buf.contents;\n\
+                 \x20\x20\x20\x20\x20\x20\x20\x20for (uint32_t i = 0; i < {v}_n; i++) \
+                 printf(\"  [%u] = %.1f\\n\", i, {v}_out[i]);\n",
+                k = kernel, v = var,
+            ));
+        }
+    }
+
+    format!(r#"#import <Foundation/Foundation.h>
+#import <Metal/Metal.h>
+#include <stdio.h>
+#include <stdint.h>
+
+int main() {{
+    @autoreleasepool {{
+        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+        if (!device) {{ fprintf(stderr, "[Salvation] Metal 미지원\n"); return 1; }}
+
+        id<MTLCommandQueue> queue = [device newCommandQueue];
+
+        NSError* error = nil;
+        NSURL* libURL = [NSURL fileURLWithPath:@"{metallib_name}"];
+        id<MTLLibrary> library = [device newLibraryWithURL:libURL error:&error];
+        if (!library) {{
+            fprintf(stderr, "[Salvation] 라이브러리 로드 실패: %s\n",
+                    [[error localizedDescription] UTF8String]);
+            return 1;
+        }}
+
+        id<MTLFunction> fn = [library newFunctionWithName:@"{kernel}"];
+        if (!fn) {{ fprintf(stderr, "[Salvation] 함수 '{kernel}' 없음\n"); return 1; }}
+
+        id<MTLComputePipelineState> pipeline =
+            [device newComputePipelineStateWithFunction:fn error:&error];
+        if (!pipeline) {{
+            fprintf(stderr, "[Salvation] 파이프라인 생성 실패: %s\n",
+                    [[error localizedDescription] UTF8String]);
+            return 1;
+        }}
+
+        // ── 테스트 버퍼 초기화 ────────────────────────────────
+{init_code}
+        // ── Compute Pass ──────────────────────────────────────
+        id<MTLCommandBuffer>         cmd = [queue commandBuffer];
+        id<MTLComputeCommandEncoder> enc = [cmd computeCommandEncoder];
+        [enc setComputePipelineState:pipeline];
+{bind_code}
+        NSUInteger tgSize = MIN((NSUInteger)64,
+                                pipeline.maxTotalThreadsPerThreadgroup);
+        MTLSize gridSize        = MTLSizeMake({n}, 1, 1);
+        MTLSize threadgroupSize = MTLSizeMake(tgSize, 1, 1);
+        [enc dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
+        [enc endEncoding];
+
+        [cmd commit];
+        [cmd waitUntilCompleted];
+
+        // ── 결과 출력 ─────────────────────────────────────────
+{print_code}
+    }}
+    return 0;
+}}
+"#,
+        metallib_name = metallib_name,
+        kernel        = kernel,
+        init_code     = init_code,
+        bind_code     = bind_code,
+        n             = test_n,
+        print_code    = print_code,
+    )
+}
+
+// ── render 전용 main.mm 생성 ─────────────────────────────────
 
 pub fn gen_main_mm(info: &ShaderInfo, metallib_name: &str) -> String {
+    // @kernel만 존재하고 @vertex/@fragment 없음 → compute 전용 boilerplate
+    if info.kernel_fn.is_some() && info.vert_fn.is_none() {
+        return gen_main_mm_compute(info, metallib_name);
+    }
+
     let vert = info.vert_fn.as_deref().unwrap_or("vert");
     let frag  = info.frag_fn.as_deref().unwrap_or("frag");
 

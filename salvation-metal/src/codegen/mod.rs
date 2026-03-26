@@ -57,7 +57,7 @@ impl Codegen {
             Type::Mat4x2  => "float4x2".into(),
             Type::Mat4x3  => "float4x3".into(),
             Type::Mat4x4  => "float4x4".into(),
-            Type::Texture2D => "texture2d".into(),
+            Type::Texture2D => "texture2d<float>".into(),  // Metal requires template arg
             Type::Sampler => "sampler".into(),
             Type::Array { inner, size } => {
                 format!("array<{}, {}>", self.emit_type(inner), size)
@@ -127,13 +127,27 @@ impl Codegen {
 
             // foo(a, b)
             Expr::Call { name, args } => {
-                self.push(name);
-                self.push("(");
-                for (i, arg) in args.iter().enumerate() {
-                    if i > 0 { self.push(", "); }
-                    self.emit_expr(arg);
+                // sample(tex, smp, coord) → Metal 메서드 문법: tex.sample(smp, coord)
+                // sampleLevel/Bias/Grad 도 동일 패턴
+                if (name == "sample" || name == "sampleLevel" || name == "sampleBias" || name == "sampleGrad")
+                    && args.len() >= 2
+                {
+                    self.emit_expr(&args[0]);     // 텍스처 오브젝트
+                    self.push(".sample(");
+                    for (i, arg) in args[1..].iter().enumerate() {
+                        if i > 0 { self.push(", "); }
+                        self.emit_expr(arg);
+                    }
+                    self.push(")");
+                } else {
+                    self.push(name);
+                    self.push("(");
+                    for (i, arg) in args.iter().enumerate() {
+                        if i > 0 { self.push(", "); }
+                        self.emit_expr(arg);
+                    }
+                    self.push(")");
                 }
-                self.push(")");
             }
 
             // v.x
@@ -372,17 +386,49 @@ impl Codegen {
                             .map(|t| self.emit_type(t))
                             .unwrap_or_else(|| "void".into());
 
-                        let frag_param = if params.len() == 1 {
-                            "VertOut out [[stage_in]]".to_string()
-                        } else {
-                            self.emit_params(params)
-                        };
+                        // texture2d / sampler 파라미터는 [[texture(n)]] / [[sampler(n)]] 어노테이션.
+                        // 나머지 파라미터는 vertex → fragment 전달 경로(VertOut [[stage_in]])를 사용.
+                        let mut tex_idx  = 0usize;
+                        let mut smp_idx  = 0usize;
+                        let mut sig_parts: Vec<String> = Vec::new();
+                        let mut stage_in_names: Vec<String> = Vec::new(); // out.xxx 로 접근
 
-                        self.push(&format!("fragment {} {}({}) ", ret_str, name, frag_param));
+                        for p in params.iter() {
+                            match &p.ty {
+                                Type::Texture2D => {
+                                    sig_parts.push(format!(
+                                        "texture2d<float> {} [[texture({})]]",
+                                        p.name, tex_idx
+                                    ));
+                                    tex_idx += 1;
+                                    // texture2d는 body에서 직접 이름으로 접근 — stage_in 제외
+                                }
+                                Type::Sampler => {
+                                    sig_parts.push(format!(
+                                        "sampler {} [[sampler({})]]",
+                                        p.name, smp_idx
+                                    ));
+                                    smp_idx += 1;
+                                    // sampler도 직접 접근 — stage_in 제외
+                                }
+                                _ => {
+                                    // 일반 데이터 파라미터 → VertOut [[stage_in]] 으로 전달
+                                    stage_in_names.push(p.name.clone());
+                                }
+                            }
+                        }
 
-                        // fragment body에서 파라미터 이름을 out.이름으로 변환
+                        // stage_in 파라미터가 있으면 VertOut out [[stage_in]] 추가 (맨 앞)
+                        if !stage_in_names.is_empty() {
+                            sig_parts.insert(0, "VertOut out [[stage_in]]".to_string());
+                        }
+
+                        let sig = sig_parts.join(", ");
+                        self.push(&format!("fragment {} {}({}) ", ret_str, name, sig));
+
+                        // body 내부: 일반 파라미터만 out. 접두사 적용
                         self.stage_in_prefix = "out".to_string();
-                        self.stage_in_params = params.iter().map(|p| p.name.clone()).collect();
+                        self.stage_in_params = stage_in_names;
                         self.emit_block(body);
                         self.stage_in_params.clear();
                         self.stage_in_prefix.clear();
@@ -391,7 +437,51 @@ impl Codegen {
                     }
 
                     Some(ShaderStage::Kernel) => {
-                        let params_str = self.emit_params(params);
+                        // Metal kernel 파라미터는 반드시 어노테이션이 있어야 함.
+                        // 휴리스틱:
+                        //   첫 번째 uint 파라미터 → [[thread_position_in_grid]] (스레드 인덱스)
+                        //   이후 uint 파라미터    → constant uint& name [[buffer(n)]] (상수)
+                        //   그 외 타입 파라미터  → device T* name [[buffer(n)]] (read-write 버퍼)
+                        let mut buf_idx = 0usize;
+                        let mut first_uint_seen = false;
+                        let mut param_strs: Vec<String> = Vec::new();
+
+                        for p in params.iter() {
+                            let ps = match &p.ty {
+                                Type::Uint if !first_uint_seen => {
+                                    first_uint_seen = true;
+                                    format!("uint {} [[thread_position_in_grid]]", p.name)
+                                }
+                                Type::Uint => {
+                                    let s = format!(
+                                        "constant uint& {} [[buffer({})]]",
+                                        p.name, buf_idx
+                                    );
+                                    buf_idx += 1;
+                                    s
+                                }
+                                Type::Int => {
+                                    let s = format!(
+                                        "constant int& {} [[buffer({})]]",
+                                        p.name, buf_idx
+                                    );
+                                    buf_idx += 1;
+                                    s
+                                }
+                                other => {
+                                    let ty_str = self.emit_type(other);
+                                    let s = format!(
+                                        "device {}* {} [[buffer({})]]",
+                                        ty_str, p.name, buf_idx
+                                    );
+                                    buf_idx += 1;
+                                    s
+                                }
+                            };
+                            param_strs.push(ps);
+                        }
+
+                        let params_str = param_strs.join(", ");
                         self.push(&format!("kernel void {}({}) ", name, params_str));
                         self.emit_block(body);
                         self.newline();

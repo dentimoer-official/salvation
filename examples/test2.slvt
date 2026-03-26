@@ -1,6 +1,10 @@
 // ── test2.slvt — 텍스처 샘플링 예제 ──────────────────────────
 // UV 좌표를 받아서 텍스처에서 색상을 샘플링하는 기본 셰이더.
-// texture2d / sampler 타입을 사용한다.
+// texture2d / sampler 타입 파라미터를 사용한다.
+//
+// Metal 변환 시 frag 함수의 albedo/smp 파라미터는
+// [[texture(0)]] / [[sampler(0)]] 어노테이션을 붙여 사용해야 하지만,
+// Salvation 언어 레벨에서는 타입만 명시하면 codegen이 처리한다.
 
 @backend(metal)
 fn main() {
@@ -9,17 +13,18 @@ fn main() {
 
 // ── vertex shader ─────────────────────────────────────────────
 // position: 클립 공간 좌표 (float4)
-// uv:       텍스처 좌표 0~1 (float2 — fragment로 전달)
+// uv:       텍스처 좌표 0~1 (float2)
 @backend(metal) @vertex
 fn vert(position: float4, uv: float2) -> float4 {
     return position;
 }
 
 // ── fragment shader ───────────────────────────────────────────
-// uv를 받아서 texture로부터 색상을 샘플링한다.
+// albedo: 텍스처 (texture2d)
+// smp:    샘플러  (sampler)
+// uv:     텍스처 좌표 (float2)
 @backend(metal) @fragment
-fn frag(uv: float2) -> float4 {
-    // 실제 텍스처 샘플링은 Metal 내장 함수 sample()을 사용한다.
-    // 현재 salvation codegen은 Call expr로 처리함.
+fn frag(albedo: texture2d, smp: sampler, uv: float2) -> float4 {
+    // sample(tex, smp, coord) → Metal의 tex.sample(smp, coord) 로 변환됨.
     return sample(albedo, smp, uv);
 }
