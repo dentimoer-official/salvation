@@ -1,7 +1,7 @@
 #ifndef COMMON_H
 #define COMMON_H
 
-#include <simd/simd.h>
+#include "shader_types.h"
 
 enum VertexAttributes {
     VertexAttributePosition = 0,
@@ -13,8 +13,4 @@ enum BufferIndex {
     FrameUniformBuffer = 1,
 };
 
-struct FrameUniforms {
-    simd::float4x4 projectionViewModel;
-};
-
-#endif
+#endif /* COMMON_H */

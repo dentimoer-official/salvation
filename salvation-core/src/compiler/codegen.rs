@@ -63,20 +63,25 @@ impl Codegen {
 
     fn emit_binop(&self, op: &BinOpKind) -> &'static str {
         match op {
-            BinOpKind::Add    => "+",
-            BinOpKind::Sub    => "-",
-            BinOpKind::Mul    => "*",
-            BinOpKind::Div    => "/",
-            BinOpKind::Mod    => "%",
-            BinOpKind::Eq     => "==",
-            BinOpKind::NotEq  => "!=",
-            BinOpKind::Lt     => "<",
-            BinOpKind::Gt     => ">",
-            BinOpKind::LtEq   => "<=",
-            BinOpKind::GtEq   => ">=",
-            BinOpKind::And    => "&&",
-            BinOpKind::Or     => "||",
-            BinOpKind::Assign => "=",
+            BinOpKind::Add       => "+",
+            BinOpKind::Sub       => "-",
+            BinOpKind::Mul       => "*",
+            BinOpKind::Div       => "/",
+            BinOpKind::Mod       => "%",
+            BinOpKind::Eq        => "==",
+            BinOpKind::NotEq     => "!=",
+            BinOpKind::Lt        => "<",
+            BinOpKind::Gt        => ">",
+            BinOpKind::LtEq      => "<=",
+            BinOpKind::GtEq      => ">=",
+            BinOpKind::And       => "&&",
+            BinOpKind::Or        => "||",
+            BinOpKind::Assign    => "=",
+            BinOpKind::AddAssign => "+=",
+            BinOpKind::SubAssign => "-=",
+            BinOpKind::MulAssign => "*=",
+            BinOpKind::DivAssign => "/=",
+            BinOpKind::ModAssign => "%=",
         }
     }
 
@@ -193,6 +198,24 @@ impl Codegen {
                     t = to_str,
                 ));
                 self.emit_block(body);
+            }
+
+            // while cond { }
+            Stmt::While { cond, body } => {
+                self.push("while (");
+                self.emit_expr(cond);
+                self.push(") ");
+                self.emit_block(body);
+            }
+
+            // break;
+            Stmt::Break => {
+                self.push("break;\n");
+            }
+
+            // continue;
+            Stmt::Continue => {
+                self.push("continue;\n");
             }
 
             // foo(x);

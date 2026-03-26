@@ -187,6 +187,10 @@ fn collect_calls_stmt(stmt: &Stmt, out: &mut Vec<String>) {
             collect_calls_expr(to, out);
             for s in body { collect_calls_stmt(s, out); }
         }
+        Stmt::While { cond, body } => {
+            collect_calls_expr(cond, out);
+            for s in body { collect_calls_stmt(s, out); }
+        }
         Stmt::ExprStmt(expr) => collect_calls_expr(expr, out),
         _ => {}
     }

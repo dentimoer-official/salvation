@@ -139,13 +139,16 @@ impl Lexer {
             "vertex"    => Token::Vertex,
 
             // 구문 키워드
-            "else" => Token::Else,
-            "for" => Token::For,
-            "if" => Token::If,
-            "in" => Token::In,
-            "let" => Token::Let,
-            "mut" => Token::Mut,
-            "return" => Token::Return,
+            "break"    => Token::Break,
+            "continue" => Token::Continue,
+            "else"     => Token::Else,
+            "for"      => Token::For,
+            "if"       => Token::If,
+            "in"       => Token::In,
+            "let"      => Token::Let,
+            "mut"      => Token::Mut,
+            "return"   => Token::Return,
+            "while"    => Token::While,
 
             // 타입 키워드
             "bool" => Token::Bool,
@@ -196,8 +199,15 @@ impl Lexer {
             }
         }
 
+        // f/F 접미사 소비 (1.0f, 0.5F — Metal/GLSL 습관 코드 호환)
+        // 값에는 영향을 주지 않고 조용히 무시함
+        if matches!(self.peek(), Some('f') | Some('F')) {
+            is_float = true;
+            self.advance();
+        }
+
         if is_float {
-            Token::FloatLit(s.parse().unwrap())
+            Token::FloatLit(s.parse().unwrap_or(0.0))
         } else {
             Token::IntLit(s.parse().unwrap())
         }
@@ -262,6 +272,9 @@ impl Lexer {
                     if self.peek() == Some('>') {
                         self.advance();
                         Token::Arrow
+                    } else if self.peek() == Some('=') {
+                        self.advance();
+                        Token::MinusEq
                     } else {
                         Token::Minus
                     }
@@ -348,19 +361,23 @@ impl Lexer {
                 // 단일 문자 연산자 / 구분자
                 '+' => {
                     self.advance();
-                    Token::Plus
+                    if self.peek() == Some('=') { self.advance(); Token::PlusEq }
+                    else { Token::Plus }
                 }
                 '*' => {
                     self.advance();
-                    Token::Star
+                    if self.peek() == Some('=') { self.advance(); Token::StarEq }
+                    else { Token::Star }
                 }
                 '/' => {
                     self.advance();
-                    Token::Slash
+                    if self.peek() == Some('=') { self.advance(); Token::SlashEq }
+                    else { Token::Slash }
                 }
                 '%' => {
                     self.advance();
-                    Token::Percent
+                    if self.peek() == Some('=') { self.advance(); Token::PercentEq }
+                    else { Token::Percent }
                 }
                 '@' => {
                     self.advance();
@@ -525,5 +542,50 @@ mod tests {
                 Token::Float,
             ]
         );
+    }
+
+    #[test]
+    fn test_float_suffix() {
+        // 1.0f, 0.5F, 2f 모두 FloatLit으로 파싱
+        let t = lex("1.0f 0.5F 2f");
+        assert_eq!(
+            t,
+            vec![
+                Token::FloatLit(1.0),
+                Token::FloatLit(0.5),
+                Token::FloatLit(2.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_compound_assign() {
+        let t = lex("+= -= *= /= %=");
+        assert_eq!(
+            t,
+            vec![
+                Token::PlusEq,
+                Token::MinusEq,
+                Token::StarEq,
+                Token::SlashEq,
+                Token::PercentEq,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_while_break_continue() {
+        let t = lex("while break continue");
+        assert_eq!(
+            t,
+            vec![Token::While, Token::Break, Token::Continue]
+        );
+    }
+
+    #[test]
+    fn test_arrow_not_minuseq() {
+        // -> 는 Arrow, -= 는 MinusEq — 혼동 없어야 함
+        let t = lex("-> -=");
+        assert_eq!(t, vec![Token::Arrow, Token::MinusEq]);
     }
 }

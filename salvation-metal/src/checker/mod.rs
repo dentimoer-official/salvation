@@ -192,11 +192,16 @@ impl Checker {
                                 ));
                             }
                             Some(Type::Bool)
-                        } else if matches!(op, BinOpKind::Assign) {
-                            // 대입은 양쪽 타입 같아야 함
+                        } else if matches!(op,
+                            BinOpKind::Assign |
+                            BinOpKind::AddAssign | BinOpKind::SubAssign |
+                            BinOpKind::MulAssign | BinOpKind::DivAssign |
+                            BinOpKind::ModAssign
+                        ) {
+                            // 대입 / 복합 대입은 양쪽 타입 같아야 함
                             if !Self::types_match(&l, &r) {
                                 self.error(format!(
-                                    "대입 타입 불일치: {:?} = {:?}", l, r
+                                    "대입 타입 불일치: {:?} op= {:?}", l, r
                                 ));
                             }
                             Some(l)
@@ -419,6 +424,20 @@ impl Checker {
                 self.check_block(body);
                 self.pop_scope();
             }
+
+            Stmt::While { cond, body } => {
+                if let Some(cond_ty) = self.check_expr(cond) {
+                    if !matches!(cond_ty, Type::Bool) {
+                        self.error(format!("while 조건은 bool 이어야 해요, got {:?}", cond_ty));
+                    }
+                }
+                self.push_scope();
+                self.check_block(body);
+                self.pop_scope();
+            }
+
+            // break / continue — 루프 밖에서의 오남용은 codegen 단계에서 잡음
+            Stmt::Break | Stmt::Continue => {}
 
             Stmt::ExprStmt(expr) => {
                 self.check_expr(expr);

@@ -71,20 +71,25 @@ impl Codegen {
 
     fn emit_binop(&self, op: &BinOpKind) -> &'static str {
         match op {
-            BinOpKind::Add    => "+",
-            BinOpKind::Sub    => "-",
-            BinOpKind::Mul    => "*",
-            BinOpKind::Div    => "/",
-            BinOpKind::Mod    => "%",
-            BinOpKind::Eq     => "==",
-            BinOpKind::NotEq  => "!=",
-            BinOpKind::Lt     => "<",
-            BinOpKind::Gt     => ">",
-            BinOpKind::LtEq   => "<=",
-            BinOpKind::GtEq   => ">=",
-            BinOpKind::And    => "&&",
-            BinOpKind::Or     => "||",
-            BinOpKind::Assign => "=",
+            BinOpKind::Add       => "+",
+            BinOpKind::Sub       => "-",
+            BinOpKind::Mul       => "*",
+            BinOpKind::Div       => "/",
+            BinOpKind::Mod       => "%",
+            BinOpKind::Eq        => "==",
+            BinOpKind::NotEq     => "!=",
+            BinOpKind::Lt        => "<",
+            BinOpKind::Gt        => ">",
+            BinOpKind::LtEq      => "<=",
+            BinOpKind::GtEq      => ">=",
+            BinOpKind::And       => "&&",
+            BinOpKind::Or        => "||",
+            BinOpKind::Assign    => "=",
+            BinOpKind::AddAssign => "+=",
+            BinOpKind::SubAssign => "-=",
+            BinOpKind::MulAssign => "*=",
+            BinOpKind::DivAssign => "/=",
+            BinOpKind::ModAssign => "%=",
         }
     }
 
@@ -209,6 +214,24 @@ impl Codegen {
                 self.emit_block(body);
             }
 
+            // while cond { }
+            Stmt::While { cond, body } => {
+                self.push("while (");
+                self.emit_expr(cond);
+                self.push(") ");
+                self.emit_block(body);
+            }
+
+            // break;
+            Stmt::Break => {
+                self.push("break;\n");
+            }
+
+            // continue;
+            Stmt::Continue => {
+                self.push("continue;\n");
+            }
+
             // foo(x);
             Stmt::ExprStmt(expr) => {
                 self.emit_expr(expr);
@@ -248,16 +271,9 @@ impl Codegen {
             }
 
             // struct Name { fields }
-            Item::StructDecl { name, fields } => {
-                self.push(&format!("struct {} {{\n", name));
-                self.indent += 1;
-                for f in fields {
-                    self.push_indent();
-                    let ty_str = self.emit_type(&f.ty);
-                    self.push(&format!("{} {};\n", ty_str, f.name));
-                }
-                self.indent -= 1;
-                self.push("};\n\n");
+            // [Fix 5] shader_types.h에 공유 정의 — Metal 셰이더에서 중복 선언 생략
+            Item::StructDecl { name, .. } => {
+                self.push(&format!("// struct {} — shader_types.h 참조\n\n", name));
             }
 
             // fn / @vertex fn / @fragment fn / @kernel fn
@@ -311,23 +327,30 @@ impl Codegen {
                         self.push(&format!("{} out;\n", out_struct));
 
                         // out.field = in.field; 자동 할당
-                        for p in params.iter() {
+                        // [Fix 3-1] 첫 번째 파라미터(position)는 return stmt에서
+                        // uniforms 행렬과 함께 처리하므로 여기선 건너뜀.
+                        for (i, p) in params.iter().enumerate() {
+                            if i == 0 { continue; }
                             self.push_indent();
                             self.push(&format!("out.{} = in.{};\n", p.name, p.name));
                         }
 
                         // .slvt body 내의 return 구문 처리
-                        // body에 return이 있으면 out.position 덮어쓰기로 변환
+                        // [Fix 3-1] return expr → out.position = uniforms.projectionViewModel * expr;
+                        // CPU가 매 프레임 계산한 변환 행렬을 GPU에서 실제로 적용함.
                         self.stage_in_prefix = "in".to_string();
                         self.stage_in_params = params.iter().map(|p| p.name.clone()).collect();
                         for stmt in body {
                             match stmt {
                                 Stmt::Return(Some(expr)) => {
-                                    // return expr → out.position = expr; return out;
+                                    let pos_name = params.first()
+                                        .map(|p| p.name.as_str())
+                                        .unwrap_or("position");
                                     self.push_indent();
-                                    self.push("out.");
-                                    self.push(&params.first().map(|p| p.name.as_str()).unwrap_or("position").to_string());
-                                    self.push(" = ");
+                                    self.push(&format!(
+                                        "out.{} = uniforms.projectionViewModel * ",
+                                        pos_name
+                                    ));
                                     self.emit_expr(expr);
                                     self.push(";\n");
                                 }
@@ -392,9 +415,11 @@ impl Codegen {
     // ── 진입점 ─────────────────────────────────────────────
 
     pub fn generate(&mut self, program: &Program) -> String {
-        // Metal 필수 헤더
         self.push("#include <metal_stdlib>\n");
-        self.push("using namespace metal;\n\n");
+        self.push("using namespace metal;\n");
+        // [Fix 5] CPU/GPU 공유 타입 헤더 — FrameUniforms 등을 한 곳에서만 정의.
+        // 이전에는 common.h와 shaders.metal 양쪽에 중복 선언되어 유지보수 지옥이었음.
+        self.push("#include \"shader_types.h\"\n\n");
 
         for item in program {
             self.emit_item(item);

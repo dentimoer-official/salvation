@@ -65,10 +65,11 @@ enum Commands {
 // ── 컴파일 파이프라인 ────────────────────────────────────────
 
 struct CompileOutput {
-    metal_src:  String,
-    common_h:   String,
-    main_mm:    String,
-    has_main:   bool,
+    metal_src:      String,
+    shader_types_h: String,   // CPU/GPU 공유 타입 헤더
+    common_h:       String,
+    main_mm:        String,
+    has_main:       bool,
 }
 
 fn compile(src: &str, verbose: bool, metallib_name: &str) -> Result<CompileOutput, String> {
@@ -103,13 +104,15 @@ fn compile(src: &str, verbose: bool, metallib_name: &str) -> Result<CompileOutpu
     // shaders.metal
     let metal_src = Codegen::new().generate(&resolved.program);
 
-    // common.h + main.mm — AST 분석 후 생성
-    let info      = host_gen::analyze(&resolved.program);
-    let common_h  = host_gen::gen_common_h(&info);
-    let main_mm   = host_gen::gen_main_mm(&info, metallib_name);
+    // 공유 타입 헤더 + host 파일 생성
+    let info           = host_gen::analyze(&resolved.program);
+    let shader_types_h = host_gen::gen_shader_types_h(&info);
+    let common_h       = host_gen::gen_common_h(&info);
+    let main_mm        = host_gen::gen_main_mm(&info, metallib_name);
 
     Ok(CompileOutput {
         metal_src,
+        shader_types_h,
         common_h,
         main_mm,
         has_main: resolved.has_main,
@@ -142,18 +145,15 @@ fn write(dir: &str, name: &str, content: &str) -> Result<String, String> {
     Ok(path.to_string_lossy().into_owned())
 }
 
-fn write_all(out: &CompileOutput, dir: &str, stem: &str) -> Result<(), String> {
-    let metal = write(dir, &format!("{}.metal", stem), &out.metal_src)?;
-    let common = write(dir, "common.h", &out.common_h)?;
-    let main_mm = write(dir, "main.mm", &out.main_mm)?;
+fn write_all(out: &CompileOutput, dir: &str, _stem: &str) -> Result<(), String> {
+    let shader_types = write(dir, "shader_types.h", &out.shader_types_h)?;
+    let metal        = write(dir, "shaders.metal",  &out.metal_src)?;
+    let common       = write(dir, "common.h",       &out.common_h)?;
+    let main_mm      = write(dir, "main.mm",        &out.main_mm)?;
+    eprintln!("  {} {}", "→".green(), shader_types);
     eprintln!("  {} {}", "→".green(), metal);
     eprintln!("  {} {}", "→".green(), common);
     eprintln!("  {} {}", "→".green(), main_mm);
-    // shaders.metal을 항상 shaders.metal로 심볼릭하거나 복사
-    // (xcrun은 shaders.metal을 직접 읽기 때문에)
-    if stem != "shaders" {
-        let _ = write(dir, "shaders.metal", &out.metal_src);
-    }
     Ok(())
 }
 

@@ -31,6 +31,9 @@ pub enum Token {
     Else,
     For,
     In,
+    While,
+    Break,
+    Continue,
 
     // 타입으로 쓸 애들
     Bool,
@@ -67,6 +70,13 @@ pub enum Token {
     Star,     // *
     Slash,    // /
     Percent,  // %
+
+    // 복합 대입 연산자
+    PlusEq,    // +=
+    MinusEq,   // -=
+    StarEq,    // *=
+    SlashEq,   // /=
+    PercentEq, // %=
 
     // 비교 & 논리 연산자
     Eq,      // =

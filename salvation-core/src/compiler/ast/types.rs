@@ -83,6 +83,8 @@ pub enum BinOpKind {
     Lt, Gt, LtEq, GtEq,
     And, Or,
     Assign,
+    // 복합 대입 (x += 1 → x = x + 1 과 동일하지만 직접 emit)
+    AddAssign, SubAssign, MulAssign, DivAssign, ModAssign,
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +121,16 @@ pub enum Stmt {
         to: Expr,
         body: Block,
     },
+
+    // while cond { }
+    While {
+        cond: Expr,
+        body: Block,
+    },
+
+    // break / continue
+    Break,
+    Continue,
 
     // 단독 표현식  foo();
     ExprStmt(Expr),

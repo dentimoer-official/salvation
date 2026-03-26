@@ -62,9 +62,23 @@ impl Parser {
             Token::Mat3x2  => Type::Mat3x2,
             Token::Mat3x3  => Type::Mat3x3,
             Token::Mat3x4  => Type::Mat3x4,
-            Token::Mat4x2  => Type::Mat4x2,
-            Token::Mat4x3  => Type::Mat4x3,
-            Token::Mat4x4  => Type::Mat4x4,
+            Token::Mat4x2    => Type::Mat4x2,
+            Token::Mat4x3    => Type::Mat4x3,
+            Token::Mat4x4    => Type::Mat4x4,
+            Token::Texture2D => Type::Texture2D,
+            Token::Sampler   => Type::Sampler,
+            // 배열 타입: [float; 4]
+            Token::LBracket => {
+                let inner = self.parse_type()?;
+                self.expect(&Token::Semicolon)?;
+                let size = if let Token::IntLit(n) = self.advance() {
+                    n as usize
+                } else {
+                    return Err("배열 크기는 정수 리터럴이어야 합니다 (예: [float; 4])".into());
+                };
+                self.expect(&Token::RBracket)?;
+                Type::Array { inner: Box::new(inner), size }
+            }
             Token::Ident(s) => Type::Named(s),
             t => return Err(format!("expected type, got {:?}", t)),
         })
@@ -79,20 +93,26 @@ impl Parser {
     // 연산자 우선순위 테이블
     fn precedence(tok: &Token) -> Option<(u8, BinOpKind)> {
         Some(match tok {
-            Token::Or     => (1, BinOpKind::Or),
-            Token::And    => (2, BinOpKind::And),
-            Token::EqEq   => (3, BinOpKind::Eq),
-            Token::BangEq => (3, BinOpKind::NotEq),
-            Token::Lt     => (4, BinOpKind::Lt),
-            Token::Gt     => (4, BinOpKind::Gt),
-            Token::LtEq   => (4, BinOpKind::LtEq),
-            Token::GtEq   => (4, BinOpKind::GtEq),
-            Token::Plus   => (5, BinOpKind::Add),
-            Token::Minus  => (5, BinOpKind::Sub),
-            Token::Star   => (6, BinOpKind::Mul),
-            Token::Slash  => (6, BinOpKind::Div),
-            Token::Percent=> (6, BinOpKind::Mod),
-            Token::Eq     => (0, BinOpKind::Assign),
+            Token::Or        => (1, BinOpKind::Or),
+            Token::And       => (2, BinOpKind::And),
+            Token::EqEq      => (3, BinOpKind::Eq),
+            Token::BangEq    => (3, BinOpKind::NotEq),
+            Token::Lt        => (4, BinOpKind::Lt),
+            Token::Gt        => (4, BinOpKind::Gt),
+            Token::LtEq      => (4, BinOpKind::LtEq),
+            Token::GtEq      => (4, BinOpKind::GtEq),
+            Token::Plus      => (5, BinOpKind::Add),
+            Token::Minus     => (5, BinOpKind::Sub),
+            Token::Star      => (6, BinOpKind::Mul),
+            Token::Slash     => (6, BinOpKind::Div),
+            Token::Percent   => (6, BinOpKind::Mod),
+            // 대입 계열 — 가장 낮은 우선순위, 우결합
+            Token::Eq        => (0, BinOpKind::Assign),
+            Token::PlusEq    => (0, BinOpKind::AddAssign),
+            Token::MinusEq   => (0, BinOpKind::SubAssign),
+            Token::StarEq    => (0, BinOpKind::MulAssign),
+            Token::SlashEq   => (0, BinOpKind::DivAssign),
+            Token::PercentEq => (0, BinOpKind::ModAssign),
             _ => return None,
         })
     }
@@ -245,6 +265,28 @@ impl Parser {
                 let to = self.parse_expr()?;
                 let body = self.parse_block()?;
                 Ok(Stmt::For { var, from, to, body })
+            }
+
+            // while cond { }
+            Token::While => {
+                self.advance();
+                let cond = self.parse_expr()?;
+                let body = self.parse_block()?;
+                Ok(Stmt::While { cond, body })
+            }
+
+            // break;
+            Token::Break => {
+                self.advance();
+                self.expect(&Token::Semicolon)?;
+                Ok(Stmt::Break)
+            }
+
+            // continue;
+            Token::Continue => {
+                self.advance();
+                self.expect(&Token::Semicolon)?;
+                Ok(Stmt::Continue)
             }
 
             // 표현식 구문

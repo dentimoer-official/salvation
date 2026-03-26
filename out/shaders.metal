@@ -1,9 +1,8 @@
 #include <metal_stdlib>
 using namespace metal;
+#include "shader_types.h"
 
-struct FrameUniforms {
-    float4x4 projectionViewModel;
-};
+// struct FrameUniforms — shader_types.h 참조
 
 struct VertIn {
     float4 position [[attribute(0)]];
@@ -17,9 +16,8 @@ struct VertOut {
 
 vertex VertOut vert(VertIn in [[stage_in]], constant FrameUniforms& uniforms [[buffer(1)]]) {
     VertOut out;
-    out.position = in.position;
     out.color = in.color;
-    out.position = in.position;
+    out.position = uniforms.projectionViewModel * in.position;
     return out;
 }
 

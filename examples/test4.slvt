@@ -1,0 +1,38 @@
+// ── test4.slvt — 루프 & 복합 대입 연산자 예제 ────────────────
+// while, break, continue, +=, -=, *= 등 새로 추가된 구문 테스트.
+// 광선-AABB 교차 판정을 간략화한 예제이다.
+
+@backend(metal)
+fn main() {}
+
+// ── vertex shader ─────────────────────────────────────────────
+@backend(metal) @vertex
+fn vert(position: float4, color: float4) -> float4 {
+    return position;
+}
+
+// ── fragment shader ───────────────────────────────────────────
+// 프래그먼트 내에서 단순한 레이마칭을 흉내낸다.
+// while + break, 복합 대입 연산자 사용.
+@backend(metal) @fragment
+fn frag(color: float4) -> float4 {
+    // 단순 반복: 색상 채널을 조금씩 감쇠
+    let mut r: float = color.x;
+    let mut g: float = color.y;
+    let mut b: float = color.z;
+
+    let mut i: int = 0;
+    while (i < 8) {
+        r *= 0.95f;
+        g *= 0.95f;
+        b *= 0.95f;
+
+        // 충분히 어두워지면 조기 탈출
+        if (r < 0.01f) {
+            break;
+        }
+        i += 1;
+    }
+
+    return float4(r, g, b, color.w);
+}
