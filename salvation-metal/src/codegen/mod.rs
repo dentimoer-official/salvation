@@ -11,6 +11,9 @@ pub struct Codegen {
     /// vertex/fragment 함수 내부에서 파라미터 이름 → "prefix.이름" 으로 변환
     stage_in_params: Vec<String>,
     stage_in_prefix: String,  // vertex: "in", fragment: "out"
+    /// vertex 출력 구조체 이름 — fragment의 [[stage_in]] 타입으로 사용
+    /// generate()에서 사전 스캔으로 설정됨
+    vert_out_struct: String,
 }
 
 impl Codegen {
@@ -20,6 +23,7 @@ impl Codegen {
             indent: 0,
             stage_in_params: Vec::new(),
             stage_in_prefix: String::new(),
+            vert_out_struct: "VertOut".to_string(), // 기본값
         }
     }
 
@@ -418,9 +422,13 @@ impl Codegen {
                             }
                         }
 
-                        // stage_in 파라미터가 있으면 VertOut out [[stage_in]] 추가 (맨 앞)
+                        // stage_in 파라미터가 있으면 {VertOut} out [[stage_in]] 추가 (맨 앞)
+                        // vert_out_struct는 generate()에서 vertex 함수명으로 미리 결정됨
                         if !stage_in_names.is_empty() {
-                            sig_parts.insert(0, "VertOut out [[stage_in]]".to_string());
+                            sig_parts.insert(
+                                0,
+                                format!("{} out [[stage_in]]", self.vert_out_struct),
+                            );
                         }
 
                         let sig = sig_parts.join(", ");
@@ -505,10 +513,18 @@ impl Codegen {
     // ── 진입점 ─────────────────────────────────────────────
 
     pub fn generate(&mut self, program: &Program) -> String {
+        // 사전 스캔: vertex 함수 이름을 파악해서 vert_out_struct 결정.
+        // fragment 함수의 [[stage_in]] 타입이 여기서 결정된 이름을 따른다.
+        for item in program {
+            if let Item::FnDecl { stage: Some(ShaderStage::Vertex), name, .. } = item {
+                self.vert_out_struct = format!("{}Out", capitalize(name));
+                break;
+            }
+        }
+
         self.push("#include <metal_stdlib>\n");
         self.push("using namespace metal;\n");
-        // [Fix 5] CPU/GPU 공유 타입 헤더 — FrameUniforms 등을 한 곳에서만 정의.
-        // 이전에는 common.h와 shaders.metal 양쪽에 중복 선언되어 유지보수 지옥이었음.
+        // CPU/GPU 공유 타입 헤더 — FrameUniforms 등을 한 곳에서만 정의.
         self.push("#include \"shader_types.h\"\n\n");
 
         for item in program {

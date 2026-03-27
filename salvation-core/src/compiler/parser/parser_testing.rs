@@ -8,11 +8,12 @@ use crate::compiler::ast::types::{
 pub struct Parser {
     tokens: Vec<Spanned<Token>>,
     pos: usize,
+    seen_main: bool,  // fn main() 중복 감지 — 파일 전체에서 딱 하나만 허용
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Spanned<Token>>) -> Self {
-        Parser { tokens, pos: 0 }
+        Parser { tokens, pos: 0, seen_main: false }
     }
 
     // ── 내부 헬퍼 ──────────────────────────────────────
@@ -455,6 +456,15 @@ impl Parser {
         let (name, is_main) = match self.peek().clone() {
             Token::Main => {
                 self.advance();
+
+                // fn main() 중복 — 파일 전체에서 하나만 허용
+                if self.seen_main {
+                    return Err(
+                        "fn main()이 이미 선언되어 있습니다. \
+                         fn main()은 파일 전체에서 하나만 존재할 수 있습니다.".into()
+                    );
+                }
+                self.seen_main = true;
 
                 // main에 @vertex/@fragment/@kernel 붙으면 에러
                 if stage.is_some() {

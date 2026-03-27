@@ -7,10 +7,7 @@ use colored::Colorize;
 use salvation_core::compiler::lexer::Lexer;
 use salvation_core::compiler::parser::parser_testing::Parser;
 use salvation_core::compiler::backend_resolver::BackendResolver;
-use salvation_metal::checker::Checker;
-use salvation_metal::codegen::Codegen;
-use salvation_metal::host_gen;
-use salvation_metal::runtime;
+use salvation_core::compiler::ast::types::Backend;
 
 // ── CLI ─────────────────────────────────────────────────────
 
@@ -65,14 +62,22 @@ enum Commands {
 // ── 컴파일 파이프라인 ────────────────────────────────────────
 
 struct CompileOutput {
-    metal_src:      String,
-    shader_types_h: String,   // CPU/GPU 공유 타입 헤더
-    common_h:       String,
-    main_mm:        String,
+    backend:        Backend,
+    metal_src:      Option<String>,
+    glsl_vert:      Option<String>,
+    glsl_frag:      Option<String>,
+    glsl_comp:      Option<String>,
+    cuda_src:       Option<String>,
+    rocm_src:       Option<String>,
+    shader_types_h: Option<String>,   // Metal: CPU/GPU 공유 타입 헤더
+    common_h:       Option<String>,
+    main_mm:        Option<String>,
+    main_cpp:       Option<String>,   // Vulkan
+    main_hip:       Option<String>,   // ROCm
     has_main:       bool,
 }
 
-fn compile(src: &str, verbose: bool, metallib_name: &str) -> Result<CompileOutput, String> {
+fn compile(src: &str, verbose: bool, _metallib_name: &str) -> Result<CompileOutput, String> {
     step(verbose, 1, 5, "렉싱");
     let tokens = Lexer::new(src).tokenize()
         .map_err(|e| format!("{} {}", "렉서 오류:".red().bold(), e))?;
@@ -90,33 +95,142 @@ fn compile(src: &str, verbose: bool, metallib_name: &str) -> Result<CompileOutpu
                 .join("\n")
         })?;
 
+    // Determine backend from program
+    let backend = get_backend(&resolved.program)?;
+
     step(verbose, 4, 5, "의미 검사");
-    Checker::new().check(&resolved.program)
-        .map_err(|errs| {
-            errs.iter()
-                .map(|e| format!("{} {}", "체커 오류:".red().bold(), e))
-                .collect::<Vec<_>>()
-                .join("\n")
-        })?;
+    check_backend(&backend, &resolved.program)?;
 
     step(verbose, 5, 5, "코드 생성");
 
-    // shaders.metal
-    let metal_src = Codegen::new().generate(&resolved.program);
+    // Generate code for the appropriate backend
+    // (체커는 step 4에서 이미 실행됨 — 여기선 codegen만)
+    let (metal_src, glsl_vert, glsl_frag, glsl_comp, cuda_src, rocm_src,
+         shader_types_h, common_h, main_mm, main_cpp, main_hip) = match backend {
+        Backend::Metal => {
+            use salvation_metal::codegen::Codegen as MetalCodegen;
+            use salvation_metal::host_gen;
 
-    // 공유 타입 헤더 + host 파일 생성
-    let info           = host_gen::analyze(&resolved.program);
-    let shader_types_h = host_gen::gen_shader_types_h(&info);
-    let common_h       = host_gen::gen_common_h(&info);
-    let main_mm        = host_gen::gen_main_mm(&info, metallib_name);
+            let metal_src = MetalCodegen::new().generate(&resolved.program);
+            let info = host_gen::analyze(&resolved.program);
+            let shader_types_h = host_gen::gen_shader_types_h(&info);
+            let common_h = host_gen::gen_common_h(&info);
+            let main_mm = host_gen::gen_main_mm(&info, "shaders.metallib");
+
+            (Some(metal_src), None, None, None, None, None,
+             Some(shader_types_h), Some(common_h), Some(main_mm), None, None)
+        }
+        Backend::Vulkan => {
+            use salvation_vulkan::codegen;
+            use salvation_vulkan::host_gen;
+
+            let output = codegen::generate(&resolved.program);
+            let info = host_gen::analyze(&resolved.program);
+            let main_cpp = host_gen::gen_main_cpp(&info);
+
+            (None, output.vertex, output.fragment, output.compute, None, None,
+             None, None, None, Some(main_cpp), None)
+        }
+        Backend::Cuda => {
+            use salvation_cuda::codegen;
+            use salvation_cuda::host_gen;
+
+            let cuda_src = codegen::generate(&resolved.program);
+            let info = host_gen::analyze(&resolved.program);
+            let main_cu = host_gen::gen_main_cu(&info);
+            let full_cu = format!("{}{}", cuda_src, main_cu);
+
+            (None, None, None, None, Some(full_cu), None,
+             None, None, None, None, None)
+        }
+        Backend::Rocm => {
+            use salvation_rocm::codegen;
+            use salvation_rocm::host_gen;
+
+            let rocm_src = codegen::generate(&resolved.program);
+            let info = host_gen::analyze(&resolved.program);
+            let main_hip = host_gen::gen_main_hip(&info);
+            let full_hip = format!("{}{}", rocm_src, main_hip);
+
+            (None, None, None, None, None, Some(full_hip),
+             None, None, None, None, None)
+        }
+    };
 
     Ok(CompileOutput {
+        backend,
         metal_src,
+        glsl_vert,
+        glsl_frag,
+        glsl_comp,
+        cuda_src,
+        rocm_src,
         shader_types_h,
         common_h,
         main_mm,
+        main_cpp,
+        main_hip,
         has_main: resolved.has_main,
     })
+}
+
+fn get_backend(program: &salvation_core::compiler::ast::types::Program) -> Result<Backend, String> {
+    use salvation_core::compiler::ast::types::Item;
+
+    // Find the first function with an explicit backend
+    for item in program {
+        if let Item::FnDecl { backend: Some(b), .. } = item {
+            return Ok(b.clone());
+        }
+    }
+
+    // Default to Metal
+    Ok(Backend::Metal)
+}
+
+fn check_backend(backend: &Backend, program: &salvation_core::compiler::ast::types::Program) -> Result<(), String> {
+    match backend {
+        Backend::Metal => {
+            use salvation_metal::checker::Checker;
+            Checker::new().check(program)
+                .map_err(|errs| {
+                    errs.iter()
+                        .map(|e| format!("{} {}", "체커 오류:".red().bold(), e))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+        }
+        Backend::Vulkan => {
+            use salvation_vulkan::checker::Checker;
+            Checker::new().check(program)
+                .map_err(|errs| {
+                    errs.iter()
+                        .map(|e| format!("{} {}", "체커 오류:".red().bold(), e))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+        }
+        Backend::Cuda => {
+            use salvation_cuda::checker::Checker;
+            Checker::new().check(program)
+                .map_err(|errs| {
+                    errs.iter()
+                        .map(|e| format!("{} {}", "체커 오류:".red().bold(), e))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+        }
+        Backend::Rocm => {
+            use salvation_rocm::checker::Checker;
+            Checker::new().check(program)
+                .map_err(|errs| {
+                    errs.iter()
+                        .map(|e| format!("{} {}", "체커 오류:".red().bold(), e))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+        }
+    }
 }
 
 fn check_only(src: &str) -> Result<bool, String> {
@@ -131,6 +245,11 @@ fn check_only(src: &str) -> Result<bool, String> {
                 .collect::<Vec<_>>()
                 .join("\n")
         })?;
+
+    // Determine backend and check
+    let backend = get_backend(&resolved.program)?;
+    check_backend(&backend, &resolved.program)?;
+
     Ok(resolved.has_main)
 }
 
@@ -146,14 +265,56 @@ fn write(dir: &str, name: &str, content: &str) -> Result<String, String> {
 }
 
 fn write_all(out: &CompileOutput, dir: &str, _stem: &str) -> Result<(), String> {
-    let shader_types = write(dir, "shader_types.h", &out.shader_types_h)?;
-    let metal        = write(dir, "shaders.metal",  &out.metal_src)?;
-    let common       = write(dir, "common.h",       &out.common_h)?;
-    let main_mm      = write(dir, "main.mm",        &out.main_mm)?;
-    eprintln!("  {} {}", "→".green(), shader_types);
-    eprintln!("  {} {}", "→".green(), metal);
-    eprintln!("  {} {}", "→".green(), common);
-    eprintln!("  {} {}", "→".green(), main_mm);
+    match out.backend {
+        Backend::Metal => {
+            if let Some(ref src) = out.shader_types_h {
+                let path = write(dir, "shader_types.h", src)?;
+                eprintln!("  {} {}", "→".green(), path);
+            }
+            if let Some(ref src) = out.metal_src {
+                let path = write(dir, "shaders.metal", src)?;
+                eprintln!("  {} {}", "→".green(), path);
+            }
+            if let Some(ref src) = out.common_h {
+                let path = write(dir, "common.h", src)?;
+                eprintln!("  {} {}", "→".green(), path);
+            }
+            if let Some(ref src) = out.main_mm {
+                let path = write(dir, "main.mm", src)?;
+                eprintln!("  {} {}", "→".green(), path);
+            }
+        }
+        Backend::Vulkan => {
+            if let Some(ref src) = out.glsl_vert {
+                let path = write(dir, "shader.vert", src)?;
+                eprintln!("  {} {}", "→".green(), path);
+            }
+            if let Some(ref src) = out.glsl_frag {
+                let path = write(dir, "shader.frag", src)?;
+                eprintln!("  {} {}", "→".green(), path);
+            }
+            if let Some(ref src) = out.glsl_comp {
+                let path = write(dir, "shader.comp", src)?;
+                eprintln!("  {} {}", "→".green(), path);
+            }
+            if let Some(ref src) = out.main_cpp {
+                let path = write(dir, "main.cpp", src)?;
+                eprintln!("  {} {}", "→".green(), path);
+            }
+        }
+        Backend::Cuda => {
+            if let Some(ref src) = out.cuda_src {
+                let path = write(dir, "salvation.cu", src)?;
+                eprintln!("  {} {}", "→".green(), path);
+            }
+        }
+        Backend::Rocm => {
+            if let Some(ref src) = out.rocm_src {
+                let path = write(dir, "salvation.hip.cpp", src)?;
+                eprintln!("  {} {}", "→".green(), path);
+            }
+        }
+    }
     Ok(())
 }
 
@@ -189,7 +350,15 @@ fn main() {
                     eprintln!("{}", "빌드 & 실행:".cyan().bold());
                     let out_path = Path::new(&output);
 
-                    if let Err(e) = runtime::build_and_run(out_path) {
+                    // Metal은 RunnerError, 나머지는 String — 통일해서 처리
+                    let runtime_result: Result<(), String> = match out.backend {
+                        Backend::Metal  => salvation_metal::runtime::build_and_run(out_path).map_err(|e| e.to_string()),
+                        Backend::Vulkan => salvation_vulkan::runtime::build_and_run(out_path),
+                        Backend::Cuda   => salvation_cuda::runtime::build_and_run(out_path),
+                        Backend::Rocm   => salvation_rocm::runtime::build_and_run(out_path),
+                    };
+
+                    if let Err(e) = runtime_result {
                         eprintln!("{} {}", "실행 오류:".red().bold(), e);
                         std::process::exit(1);
                     }
@@ -212,11 +381,18 @@ fn main() {
                     }
 
                     let out_path = Path::new(&output);
-                    match runtime::build_only(out_path) {
-                        Ok(metallib) => eprintln!(
+                    let build_result: Result<std::path::PathBuf, String> = match out.backend {
+                        Backend::Metal  => salvation_metal::runtime::build_only(out_path).map_err(|e| e.to_string()),
+                        Backend::Vulkan => salvation_vulkan::runtime::build_only(out_path),
+                        Backend::Cuda   => salvation_cuda::runtime::build_only(out_path),
+                        Backend::Rocm   => salvation_rocm::runtime::build_only(out_path),
+                    };
+
+                    match build_result {
+                        Ok(artifact) => eprintln!(
                             "{} {} {}",
                             "완료".green().bold(), "→".green(),
-                            metallib.display()
+                            artifact.display()
                         ),
                         Err(e) => {
                             eprintln!("{} {}", "셰이더 빌드 실패:".red().bold(), e);

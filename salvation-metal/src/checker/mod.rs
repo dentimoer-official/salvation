@@ -25,7 +25,7 @@ pub struct CheckError {
 }
 
 impl CheckError {
-    fn new(msg: impl Into<String>) -> Self {
+    pub(crate) fn new(msg: impl Into<String>) -> Self {
         CheckError { message: msg.into() }
     }
 }
@@ -523,7 +523,7 @@ impl Checker {
                 }
             }
 
-            Item::FnDecl { name, params, ret_ty, body, .. } => {
+            Item::FnDecl { name: _, params, ret_ty, body, .. } => {
                 self.push_scope();
 
                 // 파라미터를 스코프에 등록
@@ -546,14 +546,36 @@ impl Checker {
     // ── 진입점 ───────────────────────────────────────────
 
     pub fn check(mut self, program: &Program) -> Result<(), Vec<CheckError>> {
+        // 1단계: 선언 수집 (함수/struct 등록)
         self.collect_declarations(program);
+
+        // 2단계: 타입/스코프/반환 검사 (기존 로직)
         for item in program {
             self.check_item(item);
         }
-        if self.errors.is_empty() {
+
+        // 3단계: 서브 체커 실행 — 각 모듈이 특화된 검사를 담당
+        let mut all_errors = self.errors;
+
+        // 소유권 스타일 가변성 검사 (let vs let mut)
+        all_errors.extend(borrow_check::check(program));
+
+        // 배열 범위 초과 + 커널 guard clause 검사
+        all_errors.extend(memory_check::check(program));
+
+        // GPU 데이터 레이스 감지 (threadgroup/device 공유)
+        all_errors.extend(data_race_check::check(program));
+
+        // 생성자 인자 개수 + swizzle 성분 검사
+        all_errors.extend(type_check::check(program));
+
+        // Metal 예약어 / 충돌 이름 검사
+        all_errors.extend(word_check::check(program));
+
+        if all_errors.is_empty() {
             Ok(())
         } else {
-            Err(self.errors)
+            Err(all_errors)
         }
     }
 }

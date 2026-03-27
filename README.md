@@ -49,7 +49,7 @@ cargo run -- run examples/test1.slvt
 ```
 
 ## 🏳️ Preview
-
+https://github.com/dentimoer-official/salvation/assets/triangle.mov
 
 ## ✉️ Contact
 For detailed inquiries, technical discussions, or collaboration, please reach out via email:
